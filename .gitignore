@@ -1,0 +1,23 @@
+# Secrets et configuration locale
+.env
+.env.*
+*.pem
+*.key
+.claude/settings.local.json
+
+# Caches et bytecode Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Journaux SQLite éphémères : la base canonique est versionnée dans aret-memory/.aret-memory/.
+*.sqlite-wal
+*.sqlite-shm
+
+# Sorties dérivées locales
+aret-memory/.aret-memory/exports/
+aret-memory/.aret-memory-integration/
+
+# Environnements locaux
+.venv/
+venv/

@@ -1,0 +1,14 @@
+# Environnements et secrets locaux
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# SQLite : conserver la base canonique, exclure les fichiers éphémères.
+.aret-memory/*.sqlite-wal
+.aret-memory/*.sqlite-shm
+.aret-memory/exports/
+
+# Vérification d’intégration isolée
+.aret-memory-integration/

@@ -1,0 +1,335 @@
+{
+  "database": "/home/ubuntu/Automatic-reverse-engineering-toolkit/aret-memory/.aret-memory/aret_memory.sqlite",
+  "schema_migrations": [
+    {
+      "version": 1,
+      "checksum": "40c71b7ba3989131686321535f94972df573af3d04ee24560eccb2706aa1ff5c"
+    },
+    {
+      "version": 2,
+      "checksum": "f35e34a7cb826a3cb9a6a214807de9709ae6aea7c90e2853e8ce956bdba13fc8"
+    },
+    {
+      "version": 3,
+      "checksum": "833b78e7e93b367f76ca88afd7ada464e28f83c36681c02d248973af76a7d9cd"
+    },
+    {
+      "version": 4,
+      "checksum": "c80cfb3c09bc817a6b847ed216be40dcbe9227023852d464daaf74fcccd995de"
+    },
+    {
+      "version": 5,
+      "checksum": "b404f791a0b988237ace7eb81c70d5798fe1f1b1daa8a61d82cce11e31051f9c"
+    }
+  ],
+  "entities": {
+    "components": 17,
+    "functions": 9,
+    "bricks": 10,
+    "knowledge": 514,
+    "proofs": 0,
+    "relations": 35,
+    "audit_events": 1136,
+    "knowledge_sources": 514,
+    "migration_batches": 4
+  },
+  "knowledge_by_type": [
+    {
+      "type": "ARCHITECTURE",
+      "count": 10
+    },
+    {
+      "type": "DECISION",
+      "count": 4
+    },
+    {
+      "type": "DISCOVERY",
+      "count": 7
+    },
+    {
+      "type": "FORENSIC",
+      "count": 300
+    },
+    {
+      "type": "MEASUREMENT",
+      "count": 99
+    },
+    {
+      "type": "OBSERVATION",
+      "count": 66
+    },
+    {
+      "type": "RULE",
+      "count": 8
+    },
+    {
+      "type": "STATE",
+      "count": 20
+    }
+  ],
+  "knowledge_by_status": [
+    {
+      "status": "ACTIVE",
+      "count": 36
+    },
+    {
+      "status": "OBSERVED",
+      "count": 478
+    }
+  ],
+  "functions": [
+    {
+      "id": "EH:msvcrt!_EH_prolog3_GS",
+      "component_id": "EH",
+      "module": "msvcrt",
+      "symbol": "_EH_prolog3_GS",
+      "calling_convention": "cdecl"
+    },
+    {
+      "id": "EH:msvcrt!__except_handler3",
+      "component_id": "EH",
+      "module": "msvcrt",
+      "symbol": "__except_handler3",
+      "calling_convention": "cdecl"
+    },
+    {
+      "id": "EH:msvcrt!_except_handler4_common",
+      "component_id": "EH",
+      "module": "msvcrt",
+      "symbol": "_except_handler4_common",
+      "calling_convention": "cdecl"
+    },
+    {
+      "id": "HLE:msvcrt!wcscat_s",
+      "component_id": "HLE",
+      "module": "msvcrt",
+      "symbol": "wcscat_s",
+      "calling_convention": "cdecl"
+    },
+    {
+      "id": "HLE:user32!GetSysColor",
+      "component_id": "HLE",
+      "module": "user32",
+      "symbol": "GetSysColor",
+      "calling_convention": "stdcall"
+    },
+    {
+      "id": "LIFT:winmerge!sub_470022",
+      "component_id": "LIFT",
+      "module": "winmerge",
+      "symbol": "sub_470022",
+      "calling_convention": "unknown"
+    },
+    {
+      "id": "LIFT:winmerge!sub_85fd18",
+      "component_id": "LIFT",
+      "module": "winmerge",
+      "symbol": "sub_85fd18",
+      "calling_convention": "unknown"
+    },
+    {
+      "id": "LIFT:winmerge!sub_867436",
+      "component_id": "LIFT",
+      "module": "winmerge",
+      "symbol": "sub_867436",
+      "calling_convention": "unknown"
+    },
+    {
+      "id": "X87:msvcrt!_ftol2",
+      "component_id": "X87",
+      "module": "msvcrt",
+      "symbol": "_ftol2",
+      "calling_convention": "cdecl"
+    }
+  ],
+  "bricks": [
+    {
+      "id": "AUTO-LIFT-02",
+      "component_id": "LIFT",
+      "title": "Pré-lift et driver déterministe de DLL applicative",
+      "state": "ACTIVE",
+      "milestone": "M7",
+      "target_platform": "x86-pe32",
+      "priority": 1,
+      "description": "Brique de travail active du Front ARET pour le lifting de bibliothèques applicatives."
+    },
+    {
+      "id": "M7-GUI",
+      "component_id": "LIFT",
+      "title": "Endgame GUI multi-modules MFC",
+      "state": "ACTIVE",
+      "milestone": "M7",
+      "target_platform": "x86-pe32",
+      "priority": 1,
+      "description": "Jalon M7-GUI : lifting et exécution de DLL MFC/GUI multi-modules."
+    },
+    {
+      "id": "FIBERS-01",
+      "component_id": "CORE",
+      "title": "Fibers — fondation",
+      "state": "PLANNED",
+      "milestone": "M8",
+      "target_platform": "x86-pe32",
+      "priority": 2,
+      "description": "Jalon FIBERS-01 enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "FIBERS-02",
+      "component_id": "CORE",
+      "title": "Fibers — continuité",
+      "state": "PLANNED",
+      "milestone": "M8",
+      "target_platform": "x86-pe32",
+      "priority": 3,
+      "description": "Jalon FIBERS-02 enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "FIBERS-03",
+      "component_id": "CORE",
+      "title": "Fibers — propagation",
+      "state": "PLANNED",
+      "milestone": "M8",
+      "target_platform": "x86-pe32",
+      "priority": 3,
+      "description": "Jalon FIBERS-03 enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "PHASE-A",
+      "component_id": null,
+      "title": "Phase A d’industrialisation",
+      "state": "PLANNED",
+      "milestone": "PHASE-A",
+      "target_platform": null,
+      "priority": 3,
+      "description": "Jalon de phase enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "FIBERS-04",
+      "component_id": "CORE",
+      "title": "Fibers — intégration",
+      "state": "PLANNED",
+      "milestone": "M8",
+      "target_platform": "x86-pe32",
+      "priority": 4,
+      "description": "Jalon FIBERS-04 enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "FIBERS-05",
+      "component_id": "CORE",
+      "title": "Fibers — validation",
+      "state": "PLANNED",
+      "milestone": "M8",
+      "target_platform": "x86-pe32",
+      "priority": 4,
+      "description": "Jalon FIBERS-05 enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "PHASE-B",
+      "component_id": null,
+      "title": "Phase B d’industrialisation",
+      "state": "PLANNED",
+      "milestone": "PHASE-B",
+      "target_platform": null,
+      "priority": 4,
+      "description": "Jalon de phase enregistré à la demande de l’audit de production."
+    },
+    {
+      "id": "PHASE-C",
+      "component_id": null,
+      "title": "Phase C d’industrialisation",
+      "state": "PLANNED",
+      "milestone": "PHASE-C",
+      "target_platform": null,
+      "priority": 5,
+      "description": "Jalon de phase enregistré à la demande de l’audit de production."
+    }
+  ],
+  "relations_by_status": [
+    {
+      "status": "ACTIVE",
+      "count": 35
+    }
+  ],
+  "relations_by_type": [
+    {
+      "relation_type": "CONCERNS",
+      "count": 34
+    },
+    {
+      "relation_type": "SUPERSEDES",
+      "count": 1
+    }
+  ],
+  "migration_batches": [
+    {
+      "id": "MIG-708081-232A6EBF",
+      "status": "COMPLETED",
+      "importer_version": "aret-mmu-references/0.5.0",
+      "source_revision": "232a6ebf1d27514a1f8a401966dbb3756ff51a8a",
+      "summary_json": "{\"imported\":0,\"manifest_hash\":\"f71fbed0327fd2bcdd6b62deab3b487556a91f3d8fb36dc2c720d42bc1e44387\",\"planned\":0,\"skipped_existing\":0}"
+    },
+    {
+      "id": "MIG-8290-232A6EBF",
+      "status": "COMPLETED",
+      "importer_version": "aret-mmu-trackers/0.4.0",
+      "source_revision": "232a6ebf1d27514a1f8a401966dbb3756ff51a8a",
+      "summary_json": "{\"imported\":0,\"manifest_hash\":\"7c89975cc268e50a5e2f98e8f4b652e55cf485fab929b44075e7edabdd759625\",\"planned\":50,\"skipped_existing\":50}"
+    },
+    {
+      "id": "MIG-J71-232A6EBF",
+      "status": "COMPLETED",
+      "importer_version": "aret-mmu-journal71/0.3.0",
+      "source_revision": "232a6ebf1d27514a1f8a401966dbb3756ff51a8a",
+      "summary_json": "{\"imported\":0,\"manifest_hash\":\"eb770661f9a067a37a20a92e70d4090b6892a5e341cd2fbe43aae16e70d555e9\",\"parsed\":378,\"planned\":378,\"skipped_existing\":378}"
+    },
+    {
+      "id": "MIG-PILOT-232A6EBF",
+      "status": "COMPLETED",
+      "importer_version": "aret-mmu-pilot/0.2.0",
+      "source_revision": "232a6ebf1d27514a1f8a401966dbb3756ff51a8a",
+      "summary_json": "{\"imported\":0,\"manifest_hash\":\"7a8f764422e3d187cc62d2d2636360da5701d5b0570ae754c59a26da81838ef7\",\"skipped_existing\":9}"
+    }
+  ],
+  "front_keys": [
+    {
+      "key": "brick",
+      "value": "AUTO-LIFT-02"
+    },
+    {
+      "key": "current_wall",
+      "value": "Lifting DLL applicatives tierces (LLVM, mbedTLS, ITK) et indirect call recovery"
+    },
+    {
+      "key": "last_action",
+      "value": "Graphe initial sourcé et Active Front d’ingénierie rétablis après migration documentaire."
+    },
+    {
+      "key": "next_action",
+      "value": "Sélection pré-lift et driver déterministe sur première bibliothèque applicative"
+    },
+    {
+      "key": "relevant_1_address",
+      "value": "ARET://knowledge/ARCH-0003"
+    },
+    {
+      "key": "relevant_2_address",
+      "value": "ARET://knowledge/EH-0025"
+    },
+    {
+      "key": "relevant_3_address",
+      "value": "ARET://knowledge/X87-0003"
+    },
+    {
+      "key": "relevant_4_address",
+      "value": "ARET://knowledge/LIFT-0019"
+    },
+    {
+      "key": "relevant_5_address",
+      "value": "ARET://knowledge/RECOV-0021"
+    },
+    {
+      "key": "subsystem",
+      "value": "DLL tierces C++ / Lifting"
+    }
+  ]
+}

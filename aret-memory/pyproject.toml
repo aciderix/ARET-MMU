@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aret-mmu"
+version = "0.1.0"
+description = "MCP déterministe de mémoire persistante, contextuelle et probatoire pour ARET"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp[cli]>=2.0,<3.0",
+]
+
+[project.scripts]
+aret-memory = "cli.aret_memory:main"
+aret-mmu = "aret_mmu_server:main"
+
+[tool.setuptools]
+packages = ["core", "cli", "export", "evidence", "evidence.adapters", "hooks", "ops", "migration"]
+py-modules = ["aret_mmu_server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
