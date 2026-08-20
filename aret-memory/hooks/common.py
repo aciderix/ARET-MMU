@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.repository import AretError, MemoryStore
+from core.repository import AretError, MemoryStore, RESUME_CONTEXT_MAX_BYTES
 try:  # Exécution directe des hooks et import comme package de tests.
     from .resume_guard import RITUAL_FIELDS, ritual_prompt
 except ImportError:  # pragma: no cover - chemin script Claude Code.
@@ -178,12 +178,48 @@ def additional_context(result: dict[str, Any]) -> str:
             f"{item.get('pipeline_name', '?')}={item.get('result', '?')}" for item in runs[:8] if isinstance(item, dict)
         ))
 
-    journal = result.get("latest_document_71_entries", [])
-    if isinstance(journal, list) and journal:
-        lines.append("\nDERNIÈRES ÉVOLUTIONS (journal 71, injectées depuis SQLite) :")
-        for item in journal:
-            if isinstance(item, dict):
-                lines.append(f"- {item.get('id', '?')} — {item.get('title', '')} : {_excerpt(item)}")
+    canonical_documents = result.get("canonical_resume_documents", [])
+    if isinstance(canonical_documents, list) and canonical_documents:
+        lines.append(
+            "\nCONTENU CANONIQUE COMPLET INJECTÉ DEPUIS SQLITE : les cinq documents de reprise "
+            "(70/80/81/82/90) sont reproduits ci-dessous intégralement, page par page, depuis les "
+            "objets adressables du Store. Ils remplacent toute relecture Markdown après compaction."
+        )
+        for document in canonical_documents:
+            if not isinstance(document, dict):
+                continue
+            source_path = str(document.get("source_path", "document inconnu"))
+            lines.append(f"\n===== {source_path} — CONTENU CANONIQUE COMPLET =====")
+            pages = document.get("pages", [])
+            if not isinstance(pages, list):
+                continue
+            for page in pages:
+                if not isinstance(page, dict):
+                    continue
+                lines.append(
+                    f"\n[{page.get('address', '?')} | lignes {page.get('source_start_line', '?')}-"
+                    f"{page.get('source_end_line', '?')} | {page.get('title', '')}]\n"
+                    f"{str(page.get('content', '')).rstrip()}"
+                )
+
+    complete_journal = result.get("latest_document_71_complete_entries", [])
+    if isinstance(complete_journal, list) and complete_journal:
+        lines.append("\nDERNIÈRES ÉVOLUTIONS COMPLÈTES (journal 71, injectées depuis SQLite) :")
+        for item in complete_journal:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"\n[{item.get('address', '?')} | lignes {item.get('source_start_line', '?')}-"
+                f"{item.get('source_end_line', '?')} | {item.get('title', '')}]\n"
+                f"{str(item.get('content', '')).rstrip()}"
+            )
+    else:
+        journal = result.get("latest_document_71_entries", [])
+        if isinstance(journal, list) and journal:
+            lines.append("\nDERNIÈRES ÉVOLUTIONS (journal 71, injectées depuis SQLite) :")
+            for item in journal:
+                if isinstance(item, dict):
+                    lines.append(f"- {item.get('id', '?')} — {item.get('title', '')} : {_excerpt(item)}")
 
     audit = result.get("recent_audit", [])
     if isinstance(audit, list) and audit:
@@ -191,7 +227,14 @@ def additional_context(result: dict[str, Any]) -> str:
             f"{item.get('operation', '?')}:{item.get('entity_id', '?')}" for item in audit[:12] if isinstance(item, dict)
         ))
 
-    return "\n".join(line for line in lines if line).strip()[:15000]
+    context = "\n".join(line for line in lines if line).strip()
+    context_bytes = len(context.encode("utf-8"))
+    if context_bytes > RESUME_CONTEXT_MAX_BYTES:
+        raise AretError(
+            f"Contexte de reprise injecté trop volumineux ({context_bytes} octets > {RESUME_CONTEXT_MAX_BYTES}) ; "
+            "aucune troncature silencieuse n'est autorisée."
+        )
+    return context
 
 
 def run(hook_name: str, handler: Any) -> None:
