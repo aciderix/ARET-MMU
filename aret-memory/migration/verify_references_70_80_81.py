@@ -26,29 +26,58 @@ def covered(line_number: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= line_number <= end for start, end in ranges)
 
 
+def _stored_revision(conn: Any) -> str | None:
+    """Retourne la dernière révision qui couvre les trois sources de référence.
+
+    La révision Git de l'arbre de travail évolue lors de tout commit ARET-MMU. Elle
+    ne doit donc jamais être confondue avec la révision de provenance des objets
+    documentaires déjà ingérés dans SQLite.
+    """
+    rows = conn.execute(
+        """SELECT source_revision, MAX(imported_at) AS latest_import
+           FROM knowledge_source
+           WHERE source_path IN (?, ?, ?)
+           GROUP BY source_revision
+           HAVING COUNT(DISTINCT source_path)=3
+           ORDER BY latest_import DESC, source_revision DESC""",
+        DOCUMENTS,
+    ).fetchall()
+    return str(rows[0]["source_revision"]) if rows else None
+
+
 def verify(repository_root: Path, memory_dir: Path) -> dict[str, Any]:
-    revision = git_revision(repository_root)
+    working_tree_revision = git_revision(repository_root)
     store = MemoryStore(memory_dir, write_enabled=False)
     errors: list[str] = []
     document_counts: dict[str, int] = {}
     with store._read_connection() as conn:
-        rows = [dict(row) for row in conn.execute(
-            """SELECT ks.knowledge_id, ks.source_path, ks.source_start_line, ks.source_end_line, ks.source_hash,
-               k.content, k.content_hash, k.status
-               FROM knowledge_source ks JOIN knowledge k ON k.id=ks.knowledge_id
-               WHERE ks.source_revision=? AND ks.source_path IN (?, ?, ?)
-               ORDER BY ks.source_path, ks.source_start_line, ks.source_end_line""",
-            (revision, *DOCUMENTS),
-        )]
-        duplicates = conn.execute(
-            """SELECT source_path, source_start_line, source_end_line, COUNT(*) AS n FROM knowledge_source
-               WHERE source_revision=? AND source_path IN (?, ?, ?)
-               GROUP BY source_path, source_start_line, source_end_line HAVING n > 1""",
-            (revision, *DOCUMENTS),
-        ).fetchall()
+        revision = _stored_revision(conn)
+        if revision is None:
+            errors.append("Aucune révision SQLite ne couvre les documents 70/80/81")
+            rows = []
+            duplicates = []
+            batch = None
+        else:
+            rows = [dict(row) for row in conn.execute(
+                """SELECT ks.knowledge_id, ks.source_path, ks.source_start_line, ks.source_end_line, ks.source_hash,
+                   k.content, k.content_hash, k.status
+                   FROM knowledge_source ks JOIN knowledge k ON k.id=ks.knowledge_id
+                   WHERE ks.source_revision=? AND ks.source_path IN (?, ?, ?)
+                   ORDER BY ks.source_path, ks.source_start_line, ks.source_end_line""",
+                (revision, *DOCUMENTS),
+            )]
+            duplicates = conn.execute(
+                """SELECT source_path, source_start_line, source_end_line, COUNT(*) AS n FROM knowledge_source
+                   WHERE source_revision=? AND source_path IN (?, ?, ?)
+                   GROUP BY source_path, source_start_line, source_end_line HAVING n > 1""",
+                (revision, *DOCUMENTS),
+            ).fetchall()
+            batch = conn.execute(
+                "SELECT id, status, source_manifest_hash, summary_json FROM migration_batch WHERE id=?",
+                (f"MIG-708081-{revision[:8].upper()}",),
+            ).fetchone()
         fts_count = conn.execute("SELECT COUNT(*) FROM knowledge_fts").fetchone()[0]
         knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0]
-        batch = conn.execute("SELECT id, status, source_manifest_hash, summary_json FROM migration_batch WHERE id=?", (f"MIG-708081-{revision[:8].upper()}",)).fetchone()
     source_lines = {path: (repository_root / path).read_text(encoding="utf-8").splitlines(keepends=True) for path in DOCUMENTS}
     ranges_by_path: dict[str, list[tuple[int, int]]] = {path: [] for path in DOCUMENTS}
     for row in rows:
@@ -80,7 +109,7 @@ def verify(repository_root: Path, memory_dir: Path) -> dict[str, Any]:
     if batch is None or batch["status"] != "COMPLETED":
         errors.append("Lot MIG-708081 absent ou non terminé")
     return {
-        "ok": not errors, "revision": revision, "actual_counts": document_counts,
+        "ok": not errors, "revision": revision, "working_tree_revision": working_tree_revision, "actual_counts": document_counts,
         "duplicate_source_ranges": len(duplicates), "knowledge_count": knowledge_count, "fts_count": fts_count,
         "migration_batch": dict(batch) if batch else None, "errors": errors,
     }
