@@ -1,73 +1,49 @@
 #!/usr/bin/env python3
-"""Préparation d’import pour la référence consolidée 91.
+"""Statut non applicable de l’ancienne référence consolidée 91.
 
-Le document 91 ne constitue pas la source canonique : la vue correspondante est reconstruite
-par ``MemoryStore.export_reference_91``. Ce programme est réservé à l’arrivée ultérieure du
-Markdown historique afin de l’enregistrer comme provenance vérifiable et de comparer sa
-structure avec la vue reconstruite. Il ne fabrique jamais de contenu manquant.
+Le document 91 était une synthèse demandée à une autre IA à partir des documents 70, 71,
+80, 81, 82, 83 et des informations importantes associées. Ces sources sont déjà migrées
+avec provenance dans le Memory Store ; importer la synthèse créerait une redondance et
+ne renforcerait aucune preuve.
 
-Format attendu : un fichier UTF-8, par défaut ``docs/vision/91-reference-consolidee.md``,
-commençant par un titre Markdown de niveau 1 contenant ``91`` et comportant des sections
-``STATE``, ``RULE``, ``MEASUREMENT``, ``DECISION`` et/ou ``BRICK``. Toute différence est
-signalée pour revue humaine ; l’import n’écrase aucune connaissance canonique.
+La vue ``MemoryStore.export_reference_91`` reste disponible comme export dérivé de
+commodité, compatible avec l’ancien numéro, mais aucune source Markdown 91 n’est
+attendue, inspectée ou importée.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import re
-import sys
 from pathlib import Path
-
-EXPECTED_SECTIONS = {"STATE", "RULE", "MEASUREMENT", "DECISION", "BRICK"}
-
-
-class Document91Unavailable(FileNotFoundError):
-    """La source historique 91 attendue n’a pas encore été versionnée."""
 
 
 def inspect_source(path: Path) -> dict[str, object]:
-    if not path.is_file():
-        raise Document91Unavailable(
-            f"Document 91 indisponible : {path}. Ajoutez un Markdown UTF-8 respectant le format documenté "
-            "dans migration/import_doc91.py ; aucune migration de substitution n’est exécutée."
-        )
-    text = path.read_text(encoding="utf-8")
-    heading = re.search(r"^#\s+(.+)$", text, flags=re.MULTILINE)
-    if not heading or "91" not in heading.group(1):
-        raise ValueError("Le document 91 doit commencer par un titre Markdown de niveau 1 contenant « 91 ».")
-    sections = {match.group(1).strip().upper() for match in re.finditer(r"^##\s+(.+)$", text, flags=re.MULTILINE)}
-    matching = sorted(section for section in sections if section in EXPECTED_SECTIONS)
-    if not matching:
-        raise ValueError("Le document 91 doit contenir au moins une section STATE, RULE, MEASUREMENT, DECISION ou BRICK.")
+    """Retourne le statut explicite d’une source 91, sans jamais l’importer."""
     return {
+        "status": "NOT_APPLICABLE",
         "source": str(path.resolve()),
-        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        "title": heading.group(1).strip(),
-        "recognized_sections": matching,
-        "unrecognized_sections": sorted(sections - EXPECTED_SECTIONS),
-        "action": "ready_for_provenance_comparison",
+        "source_exists": path.is_file(),
+        "reason": (
+            "Le document 91 est une synthèse redondante des sources déjà migrées ; "
+            "aucune migration de provenance ne doit être exécutée."
+        ),
+        "action": "use_aret_export_reference_91_for_derived_view",
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Vérifie la disponibilité et le format de la référence historique 91.")
+    parser = argparse.ArgumentParser(
+        description="Confirme que l’ancienne synthèse 91 est non applicable à la migration ARET-MMU."
+    )
     parser.add_argument("--source", type=Path, default=Path("docs/vision/91-reference-consolidee.md"))
     parser.add_argument("--json", action="store_true", help="Émet un rapport JSON exploitable en automatisation.")
     args = parser.parse_args()
-    try:
-        report = inspect_source(args.source)
-    except (Document91Unavailable, UnicodeDecodeError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    report = inspect_source(args.source)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
-        print(f"Document 91 vérifié : {report['source']}")
-        print(f"SHA-256 : {report['sha256']}")
-        print("Sections reconnues : " + ", ".join(report["recognized_sections"]))
-        print("Étape suivante : comparer ce document avec aret_export_reference_91 avant toute migration de provenance.")
+        print("Document 91 : synthèse redondante, non applicable à la migration.")
+        print("Action : utiliser aret_export_reference_91 pour une vue dérivée si nécessaire.")
     return 0
 
 

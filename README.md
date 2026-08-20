@@ -87,4 +87,5 @@ Les importeurs de documents acceptent également `--repository-root /chemin/vers
 | [`aret-memory/docs/GUIDE_VULGARISE_FONCTIONNEMENT_ARET_MMU.md`](aret-memory/docs/GUIDE_VULGARISE_FONCTIONNEMENT_ARET_MMU.md) | Explication fonctionnelle complète et accessible. |
 | [`aret-memory/docs/MATRICE_CONFORMITE_V5_FINALE_2026-08-19.md`](aret-memory/docs/MATRICE_CONFORMITE_V5_FINALE_2026-08-19.md) | Matrice de conformité architecturale V5. |
 | [`aret-memory/docs/MEMOIRE_STRATEGIQUE_CAPACITES_ET_ROADMAP.md`](aret-memory/docs/MEMOIRE_STRATEGIQUE_CAPACITES_ET_ROADMAP.md) | Gestion des capacités, décisions et objectifs à long terme. |
+| [`aret-memory/docs/STATUT_DOCUMENT_91.md`](aret-memory/docs/STATUT_DOCUMENT_91.md) | Décision de non-import de la synthèse 91, redondante des sources déjà migrées. |
 | [`aret-memory/docs/CONTRATS_OPERATIONNELS.md`](aret-memory/docs/CONTRATS_OPERATIONNELS.md) | Hooks, bundles et synchronisation Git bornée. |

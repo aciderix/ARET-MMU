@@ -70,7 +70,7 @@ Le Front actif ne pointe plus vers une migration de mémoire. Il référence le 
 
 La V5 ne demande pas qu’un Markdown 91 soit maintenu comme deuxième source canonique. La table de migration V5 définit le document 91 comme une **vue reconstruite automatiquement depuis `STATE`, `RULE`, `MEASUREMENT`, `BRICK` et `DECISION`**. [1]
 
-`aret_export_reference_91` met en œuvre cette vue depuis SQLite. Le contrôleur `migration/import_doc91.py` demeure volontairement strict : si le Markdown historique réapparaît, il valide son format et refuse de fabriquer une provenance fictive. Cette séparation évite de dupliquer les 514 connaissances historiques tout en conservant la possibilité d’archiver ou comparer une source 91 authentique ultérieurement.
+`aret_export_reference_91` met en œuvre cette vue depuis SQLite. Le contrôleur `migration/import_doc91.py` retourne désormais `NOT_APPLICABLE` : le document 91 est confirmé comme une synthèse redondante des sources déjà migrées, non comme une provenance à archiver ou comparer. Cette décision évite de dupliquer les 514 connaissances historiques.
 
 ## 5. Écarts non bloquants et prérequis d’exploitation
 
@@ -80,7 +80,7 @@ La V5 ne demande pas qu’un Markdown 91 soit maintenu comme deuxième source ca
 | Preuves dans le snapshot livré | Aucune preuve initiale | Aucun `PROVEN` n’est prétendu ; cela préserve l’exigence anti-hallucination. |
 | UI de graphe/timeline | Évolution future V5 | La V5 la qualifie d’éventuelle et non d’exigence de V1. |
 | CLI de visualisation enrichie | Partiellement souhaitable | Le CLI de maintenance est présent ; une UI/CLI exhaustive n’est pas un critère bloquant selon la section export/interface humaine. |
-| Source Markdown historique 91 | Hors chemin canonique | La vue 91 reconstruite est la représentation cible explicitée par V5. |
+| Synthèse Markdown 91 | Non applicable | Elle est redondante des sources déjà migrées ; la vue 91 dérivée demeure disponible à titre de compatibilité. |
 
 ## 6. Contrôles indépendants recommandés
 

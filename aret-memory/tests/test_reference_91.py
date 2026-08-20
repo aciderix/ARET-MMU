@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import pytest
-
 from core.repository import MemoryStore
-from migration.import_doc91 import Document91Unavailable, inspect_source
+from migration.import_doc91 import inspect_source
 
 
 def test_reference_91_is_reconstructed_from_canonical_objects(tmp_path) -> None:
@@ -26,6 +24,8 @@ def test_reference_91_is_reconstructed_from_canonical_objects(tmp_path) -> None:
     assert "BRICK-1" in content
 
 
-def test_doc91_import_preparation_refuses_to_invent_missing_source(tmp_path) -> None:
-    with pytest.raises(Document91Unavailable, match="Document 91 indisponible"):
-        inspect_source(tmp_path / "docs" / "vision" / "91-reference-consolidee.md")
+def test_doc91_synthesis_is_explicitly_non_applicable(tmp_path) -> None:
+    report = inspect_source(tmp_path / "docs" / "vision" / "91-reference-consolidee.md")
+    assert report["status"] == "NOT_APPLICABLE"
+    assert report["source_exists"] is False
+    assert report["action"] == "use_aret_export_reference_91_for_derived_view"

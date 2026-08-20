@@ -31,12 +31,12 @@ Cet audit confronte le document d’architecture fourni — relu intégralement,
 
 ## Corrections réalisées dans cette passe
 
-Les écarts déterministes ont été corrigés. Le Memory Store offre désormais `restore()` et `aret_restore`; `SessionStart` renvoie l’enveloppe `hookSpecificOutput.additionalContext` attendue par Claude Code; les checkpoints de compaction sont auditables sur activation explicite; l’invalidation de preuve réévalue transactionnellement les connaissances `PROVEN`; le Front possède une reconstruction prudente; l’export HTML est dérivé du snapshot; et le Memory Bundle v3 contient l’inventaire hashé des migrations ainsi qu’une identité de source. Cette passe ajoute aussi l’auto-sync Git strictement borné et opt-in après commit SQLite, la supersession append-only de relations, la mesure Wine `winehash`, ainsi que la vue de référence 91 reconstruite et le contrôleur de sa future source historique.
+Les écarts déterministes ont été corrigés. Le Memory Store offre désormais `restore()` et `aret_restore`; `SessionStart` renvoie l’enveloppe `hookSpecificOutput.additionalContext` attendue par Claude Code; les checkpoints de compaction sont auditables sur activation explicite; l’invalidation de preuve réévalue transactionnellement les connaissances `PROVEN`; le Front possède une reconstruction prudente; l’export HTML est dérivé du snapshot; et le Memory Bundle v3 contient l’inventaire hashé des migrations ainsi qu’une identité de source. Cette passe ajoute aussi l’auto-sync Git strictement borné et opt-in après commit SQLite, la supersession append-only de relations, la mesure Wine `winehash`, ainsi que la vue de synthèse dérivée compatible avec l’ancien numéro 91 et son statut non applicable à tout import.
 
 ## Écarts conditionnels restant assumés
 
-Le seul écart fonctionnel dépendant d’un apport externe est l’enregistrement de la provenance du Markdown historique 91, qui n’est pas encore présent dans le dépôt. Cette absence ne bloque pas la référence opérationnelle : `aret_export_reference_91` est dérivé des objets canoniques, tandis que `migration/import_doc91.py` refusera explicitement toute source absente ou mal formée au lieu d’inventer une migration. La collecte sur un runner CI Windows/Wine heavy reste, par nature, conditionnée par la disponibilité de cet environnement ; les adaptateurs de capture et de preuve sont eux déjà intégrés.
+Aucun écart fonctionnel ne concerne le document 91 : il est confirmé comme une synthèse redondante des sources déjà migrées et ne doit pas être importé. `aret_export_reference_91` reste une vue dérivée de compatibilité ; `migration/import_doc91.py` retourne `NOT_APPLICABLE`. La collecte sur un runner CI Windows/Wine heavy reste, par nature, conditionnée par la disponibilité de cet environnement ; les adaptateurs de capture et de preuve sont eux déjà intégrés.
 
 ## Référence
 
-[1]: file:///home/ubuntu/upload/ARET-MMU_Architecture_Document_Definitif_v5_final.md "ARET-MMU — Architecture définitive, version v5"
+[1]: architecture/ARET-MMU_Architecture_Document_Definitif_v5_final.md "ARET-MMU — Architecture définitive, version v5"

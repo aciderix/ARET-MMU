@@ -305,7 +305,7 @@ def aret_rebuild_index(actor: str = "aret-mmu-maintenance") -> dict[str, Any]:
 
 @mcp.tool()
 def aret_export_reference_91(output_name: str | None = None) -> dict[str, Any]:
-    """Reconstruit une référence 91 lisible depuis les objets structurés, sans exiger le Markdown historique absent."""
+    """Produit une synthèse dérivée compatible avec l’ancien numéro 91 ; aucun Markdown 91 n’est attendu ni importé."""
     return _call("export_reference_91", output_name=output_name)
 
 

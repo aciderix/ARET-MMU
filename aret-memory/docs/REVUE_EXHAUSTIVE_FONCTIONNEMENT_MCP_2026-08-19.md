@@ -243,11 +243,11 @@ Quatre importeurs ont été revus. Tous extraient le texte source exact, calcule
 
 Les exécutions répétées sont idempotentes : la provenance déjà présente est détectée par révision, chemin, lignes et hash de source. Lorsque le contenu ou le manifest d’un même lot varie dans les cas stricts, l’importeur exige un nouveau lot explicite plutôt que de réécrire l’historique. L’index FTS est reconstruit une fois après les imports en masse. [16] [17] [18] [19]
 
-### Cas du document 91
+### Statut définitif du document 91
 
-Le document Markdown historique 91 n’est pas présent. Le contrôleur `migration/import_doc91.py` le confirme avec un code de sortie `2`, un message explicite et aucune migration de substitution. Il exige un fichier UTF-8 avec titre de niveau 1 contenant `91` et au moins une des sections `STATE`, `RULE`, `MEASUREMENT`, `DECISION` ou `BRICK`. [20]
+Le document 91 était une synthèse redondante produite par une autre IA à partir des documents 70, 71, 80, 81, 82, 83 et des informations importantes déjà migrées. Il ne constitue donc ni une source historique à attendre ni une provenance utile à importer. Le contrôleur `migration/import_doc91.py` retourne désormais le statut `NOT_APPLICABLE` et n’exécute aucune migration. [20]
 
-En attendant cette source, `aret_export_reference_91` produit une **vue dérivée** à partir des objets canoniques `STATE`, `RULE`, `MEASUREMENT`, `DECISION` et des `BRICK`, avec un hash logique. Cette vue n’est pas l’import historique : elle ne prétend donc pas remplacer la future provenance du document source. [2] [20]
+`aret_export_reference_91` demeure une **vue dérivée de compatibilité** à partir des objets canoniques `STATE`, `RULE`, `MEASUREMENT`, `DECISION` et `BRICK`, avec un hash logique. Elle permet de produire une synthèse à la demande sans créer de seconde source de vérité. Le statut complet est documenté dans `STATUT_DOCUMENT_91.md`. [2] [20]
 
 ## 12. Exports et Memory Bundle v3
 
@@ -293,7 +293,7 @@ La suite exécutée contient 27 tests. Elle couvre notamment les scénarios suiv
 | Hooks | Contexte structuré en lecture seule et enveloppe SessionStart. |
 | Git | Commit limité à la mémoire, refus hors périmètre et auto-sync opt-in. |
 | Oracles | PASS, FAIL, SKIPPED, preuve non admissible et promotion. |
-| Référence 91 | Reconstruction depuis le canonique et refus de source absente. |
+| Référence 91 | Synthèse dérivée depuis le canonique ; import non applicable. |
 | Relations | Supersession append-only et événement `SUPERSEDE_RELATION`. |
 
 Le contrôle d’intégration MCP démarre un client stdio, vérifie la déclaration des 28 outils et appelle `aret_boot` avec succès. La compilation de tous les modules Python a également réussi. [6] [9] [15] [21] [22]
@@ -320,7 +320,7 @@ Le vérificateur peut répéter les contrôles suivants depuis `aret-memory/` :
 pytest -q
 python3 tests/mcp_integration_check.py
 python3 -m compileall -q aret_mmu_server.py core evidence hooks migration ops
-python3 migration/import_doc91.py --json ; echo $?
+python3 migration/import_doc91.py --json  # retourne NOT_APPLICABLE
 ```
 
 Pour vérifier la politique Git sans modifier le code source, il peut contrôler le fichier `.aret-memory/sync_policy.json`, puis utiliser un dépôt de test avec un changement sous `.aret-memory/` et, séparément, un fichier hors périmètre. Les tests `tests/test_git_autosync.py` et `tests/test_operational_extensions.py` constituent les scénarios de référence.
@@ -354,7 +354,7 @@ Les éléments non finalisables sans apport externe sont explicitement refusés 
 [17]: ../migration/import_journal_71.py "Import exhaustif déterministe du journal 71"
 [18]: ../migration/import_references_70_80_81.py "Import non chevauchant des références"
 [19]: ../migration/import_trackers_82_90.py "Import des trackers 82 et 90"
-[20]: ../migration/import_doc91.py "Contrôleur d’arrivée de la source historique 91"
+[20]: ../migration/import_doc91.py "Statut non applicable de la synthèse 91"
 [21]: ../tests/test_operational_extensions.py "Tests d’intégration hooks, Git et bundles"
 [22]: ../tests/test_architecture_conformance.py "Tests de conformité transversale"
 [23]: ./CONTRAT_MCP_V1.md "Contrat V1 historique"

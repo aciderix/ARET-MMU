@@ -1,14 +1,14 @@
 # Rapport de correction de l’audit externe ARET-MMU
 
 **Date :** 19 août 2026
-**Périmètre :** tous les constats de l’audit externe, **à l’exclusion volontaire du document historique 91**, conformément à la demande.
+**Périmètre historique :** tous les constats de l’audit externe, avec une hypothèse alors formulée sur le document 91. **Addendum du 20 août 2026 :** cette hypothèse est invalidée ; le document 91 est une synthèse redondante et non une source à importer.
 **Révision source de référence :** `232a6ebf1d27514a1f8a401966dbb3756ff51a8a`.
 
 ## Synthèse de qualification
 
 | Constat | Qualification | Traitement |
 |---|---|---|
-| M1 — Document 91 absent | Hors périmètre demandé | Aucune migration exécutée et aucun contenu inventé. |
+| M1 — Document 91 absent | Requalifié non applicable | Il s’agit d’une synthèse redondante des sources déjà migrées ; aucun import ne doit être exécuté. |
 | M2 — Graphe initial vide | Confirmé | Bootstrap déterministe ajouté et appliqué. |
 | M3 — Active Front de migration | Confirmé | Front d’ingénierie réinitialisé de manière auditée. |
 | M4 — `ARET://relation/...` non lisible | Confirmé | Schéma d’adressage et lecture exacte corrigés. |
@@ -97,9 +97,9 @@ Les nouveaux tests couvrent la lecture d’une relation via son adresse, le chec
 
 Le snapshot JSON joint à la livraison fournit la liste exacte des fonctions, la distribution des relations et le Front final.
 
-## Document 91
+## Statut définitif du document 91
 
-Le document 91 est explicitement laissé hors de cette passe. Le contrôleur existant continue de refuser une source absente ou invalide ; aucune migration de substitution n’a été créée ou déclenchée.
+L’hypothèse de source 91 manquante, employée au moment de cet audit, a été corrigée le 20 août 2026. Le document est une synthèse redondante des sources déjà migrées, donc non applicable à la migration. `migration/import_doc91.py` retourne désormais `NOT_APPLICABLE` et `aret_export_reference_91` reste uniquement une vue dérivée de compatibilité. Voir `STATUT_DOCUMENT_91.md`.
 
 ## Références
 
