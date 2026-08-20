@@ -59,7 +59,7 @@ def load_state(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | No
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(value, dict) or value.get("version") != 2:
+    if not isinstance(value, dict) or value.get("version") != 3:
         return None
     return value
 
@@ -71,15 +71,18 @@ def _write_state(memory_dir: Path, payload: dict[str, Any], state: dict[str, Any
     temporary.replace(path)
 
 
-def arm(memory_dir: Path, payload: dict[str, Any], reason: str) -> dict[str, Any]:
-    """Arme une confirmation de rituel pour la session concernée."""
+def arm(memory_dir: Path, payload: dict[str, Any], reason: str, resume_contract_hash: str) -> dict[str, Any]:
+    """Arme une confirmation liée à l’empreinte du dossier réellement injecté."""
+    if len(resume_contract_hash) != 64 or any(char not in "0123456789abcdef" for char in resume_contract_hash):
+        raise ValueError("Empreinte Resume Dossier invalide : hash SHA-256 hexadécimal requis")
     armed_at = utc_now()
     state = {
-        "version": 2,
+        "version": 3,
         "armed_at": armed_at,
         "reason": reason,
         "status": "awaiting_recap",
         "required_fields": [field for field, _, _ in RITUAL_FIELDS],
+        "resume_contract_hash": resume_contract_hash,
         "acknowledged_at": None,
         "recap": None,
     }
@@ -145,6 +148,8 @@ def acknowledge(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | N
         normalized = validate_recap(recap)
     except ValueError:
         return state
+    if recap.get("resume_contract_hash") != state.get("resume_contract_hash"):
+        return state
     state["status"] = "acknowledged"
     state["acknowledged_at"] = utc_now()
     state["recap"] = normalized
@@ -152,12 +157,13 @@ def acknowledge(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | N
     return state
 
 
-def ritual_prompt() -> str:
+def ritual_prompt(resume_contract_hash: str) -> str:
     fields = "; ".join(label for _, label, _ in RITUAL_FIELDS)
     return (
         "Le contexte de reprise a déjà été injecté depuis SQLite canonique : ne relisez pas les documents source. "
         "Avant toute action de poursuite, produisez un récapitulatif fidèle couvrant : " + fields + ". "
-        "Puis appelez aret_acknowledge_resume avec les six champs correspondants."
+        "Puis appelez aret_acknowledge_resume avec les six champs correspondants et "
+        f"resume_contract_hash={resume_contract_hash}."
     )
 
 
@@ -172,7 +178,7 @@ def decision(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": "BARRIÈRE DE REPRISE ARET-MMU : le récapitulatif rituel doit être confirmé avant toute action de poursuite.",
-            "additionalContext": ritual_prompt(),
+            "additionalContext": ritual_prompt(str(state.get("resume_contract_hash", ""))),
         }
     }
 
@@ -185,7 +191,7 @@ def stop_feedback(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] |
     return {
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": "BARRIÈRE DE REPRISE ARET-MMU ACTIVE : ne concluez pas et ne poursuivez pas encore. " + ritual_prompt(),
+            "additionalContext": "BARRIÈRE DE REPRISE ARET-MMU ACTIVE : ne concluez pas et ne poursuivez pas encore. " + ritual_prompt(str(state.get("resume_contract_hash", ""))),
         }
     }
 

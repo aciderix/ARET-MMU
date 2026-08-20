@@ -13,6 +13,10 @@ from ops.git_memory import GitMemoryError, commit, status
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PLAYBOOK_PADDING = (
+    " Cette règle est stable, s’applique à tout incrément, exige une preuve reproductible et "
+    "interdit tout succès silencieux, toute valeur inventée ou toute conclusion non auditée."
+)
 
 
 def run_hook(name: str, memory_dir: Path, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -31,7 +35,34 @@ def populated_store(memory_dir: Path) -> MemoryStore:
         knowledge_type="OBSERVATION", status="OBSERVED", title="Objet de test", content="Contenu canonique.",
         component_id="CORE", function_id=None, brick_id=None, tags=["TEST"], proof_ids=[], supersedes_id=None, actor="test",
     )
-    store.update_front({"subsystem": "test", "relevant_1_address": "ARET://knowledge/CORE-0001"}, "test")
+    playbook = (
+        ("PLAYBOOK_FOUNDATION", "Règle fondatrice", "Juste ou arrêt bruyant, jamais de valeur inventée."),
+        ("PLAYBOOK_METHOD", "Méthode", "Mesurer, reproduire, vérifier et documenter chaque incrément."),
+        ("PLAYBOOK_ARCHITECTURE", "Architecture", "Wine est une source et un oracle, jamais une dépendance runtime."),
+        ("PLAYBOOK_GATES", "Gates", "Les oracles requis valident chaque modification pertinente."),
+        ("PLAYBOOK_TOOLING", "Outils", "Les outils de mesure sont utilisés avant toute conclusion."),
+    )
+    for domain, title, content in playbook:
+        tags = ["CORE_PLAYBOOK", domain]
+        if domain == "PLAYBOOK_ARCHITECTURE":
+            tags.append("PLAYBOOK_SHARED_STACK")
+        store.append_knowledge(
+            knowledge_type="ARCHITECTURE" if domain == "PLAYBOOK_ARCHITECTURE" else "RULE",
+            status="ACTIVE", title=title, content=content + PLAYBOOK_PADDING, component_id="CORE", function_id=None,
+            brick_id=None, tags=tags, proof_ids=[], supersedes_id=None, actor="test",
+        )
+    store.update_front({
+        "subsystem": "test", "current_wall": "validation", "last_action": "fixture initialisée",
+        "next_action": "Confirmer le handoff", "relevant_1_address": "ARET://knowledge/CORE-0001",
+    }, "test")
+    store.prepare_handoff(
+        work_summary="La fixture de reprise a préparé un playbook et un handoff actifs.",
+        verified_results="Les objets de test ont été enregistrés dans SQLite canonique.",
+        open_risks="Aucun risque bloquant de fixture n’est connu.",
+        deferred_items="Aucun élément de fixture n’est différé.",
+        next_action="Exécuter le hook et confirmer le rituel de reprise.",
+        relevant_addresses=["ARET://knowledge/CORE-0001"], actor="test",
+    )
     return store
 
 

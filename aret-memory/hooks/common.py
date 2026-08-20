@@ -20,6 +20,8 @@ except ImportError:  # pragma: no cover - chemin script Claude Code.
     from resume_guard import RITUAL_FIELDS, ritual_prompt
 
 
+HOOK_CONTEXT_MAX_BYTES = 18_500
+
 MCP_TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "reprise et mémoire": (
         "aret_boot", "aret_restore", "aret_get_front", "aret_get_resume_brief", "aret_get_resume_protocol",
@@ -31,8 +33,9 @@ MCP_TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "aret_register_function", "aret_register_brick", "aret_update_brick",
     ),
     "Front, roadmap et transport": (
-        "aret_update_front", "aret_replace_front", "aret_rebuild_front", "aret_get_roadmap", "aret_export_roadmap",
-        "aret_rebuild_index", "aret_export", "aret_export_bundle", "aret_import_bundle", "aret_sync_memory", "aret_export_reference_91",
+        "aret_update_front", "aret_replace_front", "aret_prepare_handoff", "aret_rebuild_front", "aret_get_roadmap",
+        "aret_export_roadmap", "aret_rebuild_index", "aret_export", "aret_export_bundle", "aret_import_bundle",
+        "aret_sync_memory", "aret_export_reference_91",
     ),
     "oracles, industrialisation et assets": (
         "aret_run_oracle", "aret_get_pipeline_catalog", "aret_get_toolchain_status", "aret_run_pipeline",
@@ -74,81 +77,72 @@ def repository_context() -> dict[str, Any]:
         return {"branch": "unknown", "working_tree": [], "recent_commits": [], "unavailable": True}
 
 
-def _excerpt(item: dict[str, Any]) -> str:
-    excerpt = " ".join(str(item.get("content_excerpt", "")).split())
-    return excerpt or "Contenu non disponible dans le paquet borné."
-
-
-def _front_lines(result: dict[str, Any]) -> list[str]:
-    front = result.get("front", {})
+def _front_lines(front: dict[str, Any]) -> list[str]:
     state = front.get("state", {}) if isinstance(front, dict) else {}
     lines: list[str] = []
     for key in ("subsystem", "brick", "current_wall", "last_action", "next_action"):
         value = state.get(key, {}) if isinstance(state, dict) else {}
         if isinstance(value, dict) and value.get("value"):
             lines.append(f"{key}: {value['value']}")
-    addresses = front.get("relevant_addresses", []) if isinstance(front, dict) else []
-    if isinstance(addresses, list) and addresses:
-        lines.append("Adresses chaudes : " + ", ".join(str(item) for item in addresses[:12]))
     return lines
 
 
+def _compact_tool_groups() -> str:
+    return " ; ".join(f"{group}: {', '.join(tools)}" for group, tools in MCP_TOOL_GROUPS.items())
+
+
 def additional_context(result: dict[str, Any]) -> str:
-    """Produit le paquet de reprise automatique et son rituel obligatoire.
-
-    Les textes sont extraits de SQLite canonique. Les documents Markdown ayant
-    déjà été ingérés, aucun rituel de relecture documentaire n'est demandé.
-    """
+    """Produit le dossier de reprise contractuel sans extrait arbitraire ni relecture Markdown."""
+    dossier = result.get("resume_dossier")
+    if not isinstance(dossier, dict) or not dossier.get("ready"):
+        errors = dossier.get("errors", []) if isinstance(dossier, dict) else []
+        raise AretError("Resume Dossier non injectable : " + "; ".join(str(item) for item in errors))
+    playbook = dossier.get("playbook", {})
+    entries = playbook.get("entries", []) if isinstance(playbook, dict) else []
+    handoff = dossier.get("handoff", {}) if isinstance(dossier.get("handoff"), dict) else {}
+    front = dossier.get("front", {}) if isinstance(dossier.get("front"), dict) else {}
     lines = [
-        "ARET-MMU — reprise automatique depuis SQLite canonique.",
-        "Les documents métier sont déjà ingérés : ne les relisez pas par défaut. Approfondissez seulement une adresse précise si le travail le justifie.",
-        str(result.get("doctrine", "")),
-        "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE : " + ritual_prompt(),
-        "Le contenu de ce récapitulatif doit être produit dans la réponse de reprise avant l’appel MCP de confirmation.",
-        "\nÉTAT COURANT / FRONT :",
-        *_front_lines(result),
+        "# ARET-MMU — DOSSIER DE REPRISE CANONIQUE",
+        "Ce dossier est dérivé de SQLite canonique, versionné, borné et contrôlé. Les documents métier historiques ne doivent pas être relus après compaction ; ne faites FIND/READ que pour approfondir une adresse précise nécessaire à la tâche.",
+        f"Version du contrat : {dossier.get('contract_hash', '?')} ; préparation : {dossier.get('prepared_at', '?')}.",
+        "\n## 1. PLAYBOOK STABLE — LOIS D’ARET",
     ]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        domains = ", ".join(str(item) for item in entry.get("domains", []))
+        lines.append(f"\n### {entry.get('title', '?')} [{domains}] — {entry.get('address', '?')}")
+        lines.append(str(entry.get("content", "")).strip())
 
-    git = result.get("git_context", {})
-    if isinstance(git, dict):
-        if git.get("branch"):
-            lines.append("\nGIT — branche : " + str(git["branch"]))
-        commits = git.get("recent_commits", [])
-        if isinstance(commits, list) and commits:
-            lines.append("Derniers commits : " + " | ".join(str(item) for item in commits[:8]))
-        working_tree = git.get("working_tree", [])
-        if isinstance(working_tree, list) and working_tree:
-            lines.append("Arbre Git non propre : " + " | ".join(str(item) for item in working_tree[:12]))
-
-    lines.append("\nLIMITES À RAPPELER DANS LE RÉCAPITULATIF : FIND ne prouve rien ; READ récupère l’objet exact ; PROVEN exige une preuve PASS admissible ; aucun SQL, shell, URL ou push Git arbitraire n’est exposé ; `auto_push=false` reste la politique par défaut ; le document 91 est NOT_APPLICABLE.")
-
-    rules = result.get("rules", [])
-    if isinstance(rules, list) and rules:
-        lines.append("\nRÈGLES INCONTOURNABLES (injectées depuis SQLite) :")
-        for item in rules:
-            if isinstance(item, dict):
-                lines.append(f"- {item.get('id', '?')} — {item.get('title', '')} : {_excerpt(item)}")
-
-    roadmap = result.get("roadmap", {})
-    if isinstance(roadmap, dict):
-        bricks = roadmap.get("bricks", [])
-        if isinstance(bricks, list) and bricks:
-            lines.append("\nROADMAP ACTIVE / BLOQUEURS :")
-            for brick in bricks[:8]:
-                if isinstance(brick, dict):
-                    lines.append(
-                        f"- {brick.get('id', '?')} [{brick.get('state', '?')}] M={brick.get('milestone', '?')} "
-                        f"priorité={brick.get('priority', '?')} plateforme={brick.get('target_platform', '?')} — {brick.get('title', '')}"
-                    )
+    lines.extend([
+        "\n## 2. HANDOFF ACTIF — ÉTAT DU CHANTIER",
+        *_front_lines(front),
+        "\n### Résumé du travail réellement en cours",
+        str(handoff.get("handoff_work_summary", "")),
+        "\n### Résultats vérifiés",
+        str(handoff.get("handoff_verified_results", "")),
+        "\n### Risques ouverts",
+        str(handoff.get("handoff_open_risks", "")),
+        "\n### Dette sound et éléments différés",
+        str(handoff.get("handoff_deferred_items", "")),
+        "\n### Prochaine action atomique",
+        str(handoff.get("next_action", "")),
+        "\n## 3. ADRESSES PERTINENTES",
+    ])
+    addresses = front.get("relevant_addresses", []) if isinstance(front, dict) else []
+    if isinstance(addresses, list) and addresses:
+        lines.extend(f"- {address}" for address in addresses[:5])
+    else:
+        lines.append("- Aucune adresse chaude : préparer le handoff avant toute pause future.")
 
     catalog = result.get("pipeline_catalog", {})
     if isinstance(catalog, dict):
-        lines.append("\nCAPACITÉS D’ANALYSE ET D’INDUSTRIALISATION :")
-        lines.append("Les pipelines sont à liste fermée ; `dry_run=true` précède toute génération, réseau ou opération sensible.")
+        lines.append("\n## 4. CAPACITÉS, OUTILS ET PORTES")
+        lines.append("Pipelines fermés : dry_run=true est obligatoire avant toute opération GENERATE, NETWORK ou SENSITIVE.")
         for policy in ("READ_ONLY", "GENERATE", "NETWORK", "SENSITIVE"):
             names = catalog.get(policy, [])
             if isinstance(names, list) and names:
-                lines.append(f"- {policy}: " + ", ".join(str(name) for name in names))
+                lines.append(f"- {policy}: {', '.join(str(item) for item in names)}")
     toolchain = result.get("toolchain_status", {})
     if isinstance(toolchain, dict):
         tools = toolchain.get("tools", {})
@@ -157,41 +151,31 @@ def additional_context(result: dict[str, Any]) -> str:
             missing = [name for name, item in tools.items() if isinstance(item, dict) and not item.get("available")]
             lines.append("Toolchain disponible : " + ", ".join(available[:12]))
             if missing:
-                lines.append("Toolchain à installer / indisponible : " + ", ".join(missing[:12]))
+                lines.append("Toolchain indisponible : " + ", ".join(missing[:12]))
+    lines.append("Outils MCP par capacité : " + _compact_tool_groups())
 
-    lines.append("\nOUTILS MCP DISPONIBLES (par capacité) :")
-    for group, tools in MCP_TOOL_GROUPS.items():
-        lines.append(f"- {group}: " + ", ".join(tools))
+    git = result.get("git_context", {})
+    lines.append("\n## 5. GIT, LIMITES ET GARDE-FOUS")
+    if isinstance(git, dict):
+        lines.append("Branche : " + str(git.get("branch", "unknown")))
+        commits = git.get("recent_commits", [])
+        if isinstance(commits, list) and commits:
+            lines.append("Derniers commits : " + " | ".join(str(item) for item in commits[:8]))
+        working_tree = git.get("working_tree", [])
+        if isinstance(working_tree, list) and working_tree:
+            lines.append("Arbre Git non propre : " + " | ".join(str(item) for item in working_tree[:12]))
+    lines.append("FIND ne prouve rien ; READ récupère l’objet exact ; PROVEN exige une preuve PASS admissible. Aucun SQL, shell, URL ou push Git arbitraire n’est exposé. auto_push=false. Document 91 : NOT_APPLICABLE.")
 
-    assets = result.get("assets", [])
-    lines.append("\nASSETS / CORPUS DISPONIBLES :")
-    if isinstance(assets, list) and assets:
-        for asset in assets[:8]:
-            if isinstance(asset, dict):
-                lines.append(f"- {asset.get('id', '?')} [{asset.get('kind', '?')}] {asset.get('display_name', asset.get('path', '?'))}")
-    else:
-        lines.append("- Aucun asset canonique enregistré dans le Store à cette reprise.")
-
-    runs = result.get("recent_pipeline_runs", [])
-    if isinstance(runs, list) and runs:
-        lines.append("\nDERNIERS PIPELINES : " + "; ".join(
-            f"{item.get('pipeline_name', '?')}={item.get('result', '?')}" for item in runs[:8] if isinstance(item, dict)
-        ))
-
-    journal = result.get("latest_document_71_entries", [])
-    if isinstance(journal, list) and journal:
-        lines.append("\nDERNIÈRES ÉVOLUTIONS (journal 71, injectées depuis SQLite) :")
-        for item in journal:
-            if isinstance(item, dict):
-                lines.append(f"- {item.get('id', '?')} — {item.get('title', '')} : {_excerpt(item)}")
-
-    audit = result.get("recent_audit", [])
-    if isinstance(audit, list) and audit:
-        lines.append("\nAUDIT RÉCENT : " + "; ".join(
-            f"{item.get('operation', '?')}:{item.get('entity_id', '?')}" for item in audit[:12] if isinstance(item, dict)
-        ))
-
-    return "\n".join(line for line in lines if line).strip()[:15000]
+    lines.extend([
+        "\n## 6. RITUEL DE CONFIRMATION OBLIGATOIRE",
+        "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE : " + ritual_prompt(str(dossier.get("contract_hash", ""))),
+        "Produisez le récapitulatif dans votre réponse de reprise puis appelez aret_acknowledge_resume avec les six champs et resume_contract_hash. La barrière PreToolUse refusera toute autre action jusque-là.",
+    ])
+    context = "\n".join(line for line in lines if line).strip()
+    size = len(context.encode("utf-8"))
+    if size > HOOK_CONTEXT_MAX_BYTES:
+        raise AretError(f"Resume Dossier dépasse la borne de transport de {HOOK_CONTEXT_MAX_BYTES} octets ({size})")
+    return context
 
 
 def run(hook_name: str, handler: Any) -> None:

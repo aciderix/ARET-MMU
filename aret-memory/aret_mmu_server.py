@@ -76,6 +76,7 @@ def aret_acknowledge_resume(
     git_state: str,
     risks_and_limits: str,
     next_action: str,
+    resume_contract_hash: str,
 ) -> dict[str, Any]:
     """Valide le récapitulatif rituel requis après SessionStart ou PostCompact avant toute poursuite ARET."""
     try:
@@ -87,13 +88,16 @@ def aret_acknowledge_resume(
             "risks_and_limits": risks_and_limits,
             "next_action": next_action,
         })
+        if len(resume_contract_hash) != 64 or any(char not in "0123456789abcdef" for char in resume_contract_hash):
+            raise ValueError("resume_contract_hash doit être un SHA-256 hexadécimal de 64 caractères")
         return {
             "ok": True,
             "operation": "acknowledge_resume",
             "result": {
                 "acknowledged": True,
                 "sections": list(recap),
-                "notice": "Le récapitulatif est formellement complet. Le hook PostToolUse lève la barrière pour cette session.",
+                "resume_contract_hash": resume_contract_hash,
+                "notice": "Le récapitulatif est formellement complet. Le hook PostToolUse ne lève la barrière que si son hash correspond au dossier injecté.",
             },
         }
     except ValueError as exc:
@@ -211,6 +215,29 @@ def aret_update_front(updates: dict[str, str], actor: str = "mcp-agent") -> dict
 def aret_replace_front(updates: dict[str, str], actor: str = "mcp-agent") -> dict[str, Any]:
     """Remplace entièrement l’Active Front après validation des clés et inscrit l’état précédent dans l’audit."""
     return _call("replace_front", updates=updates, actor=actor)
+
+
+@mcp.tool()
+def aret_prepare_handoff(
+    work_summary: str,
+    verified_results: str,
+    open_risks: str,
+    deferred_items: str,
+    next_action: str,
+    relevant_addresses: list[str] | None = None,
+    actor: str = "mcp-agent",
+) -> dict[str, Any]:
+    """Prépare atomiquement le handoff actif et initialise le playbook V5 tagué si nécessaire avant une pause ou compaction."""
+    return _call(
+        "prepare_handoff",
+        work_summary=work_summary,
+        verified_results=verified_results,
+        open_risks=open_risks,
+        deferred_items=deferred_items,
+        next_action=next_action,
+        relevant_addresses=relevant_addresses,
+        actor=actor,
+    )
 
 
 @mcp.tool()

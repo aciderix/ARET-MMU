@@ -29,7 +29,7 @@ async def main() -> None:
             required = {
                 "aret_boot", "aret_restore", "aret_get_front", "aret_get_resume_brief", "aret_get_resume_protocol", "aret_acknowledge_resume", "aret_find", "aret_read", "aret_read_batch",
                 "aret_get_forensics", "aret_get_proofs", "aret_get_related", "aret_get_roadmap", "aret_read_artifact",
-                "aret_append_knowledge", "aret_update_front", "aret_replace_front", "aret_rebuild_front",
+                "aret_append_knowledge", "aret_update_front", "aret_replace_front", "aret_prepare_handoff", "aret_rebuild_front",
                 "aret_record_proof", "aret_attach_proof", "aret_invalidate_proof", "aret_add_relation",
                 "aret_supersede_relation", "aret_register_component", "aret_register_function", "aret_register_brick", "aret_update_brick",
                 "aret_rebuild_index", "aret_export", "aret_export_bundle", "aret_import_bundle", "aret_export_roadmap",
@@ -54,6 +54,7 @@ async def main() -> None:
                 "git_state": "La branche, les derniers commits et l’état de l’arbre Git ont été examinés dans le contexte de reprise injecté.",
                 "risks_and_limits": "Aucun SQL, shell ou push Git arbitraire ; auto_push reste faux et le document 91 demeure non applicable.",
                 "next_action": "Je vais confirmer le point de départ avec le Front avant une action ciblée, mesurée et conforme aux garde-fous.",
+                "resume_contract_hash": "a" * 64,
             })
             if not acknowledgement.structured_content or acknowledgement.structured_content.get("ok") is not True:
                 raise AssertionError(f"Confirmation de reprise inattendue : {acknowledgement}")

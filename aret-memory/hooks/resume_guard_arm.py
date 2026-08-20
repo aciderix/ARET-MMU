@@ -13,11 +13,13 @@ def main() -> None:
     payload = input_payload()
     store = store_from_payload(payload)
     reason = str(payload.get("reason") or payload.get("hook_event_name") or "manual")[:64]
-    state = arm(Path(store.memory_dir), payload, reason=reason)
+    context = store.get_resume_context(journal_limit=8, rule_limit=12, excerpt_bytes=260)
+    dossier_hash = context["resume_dossier"]["contract_hash"]
+    state = arm(Path(store.memory_dir), payload, reason=reason, resume_contract_hash=dossier_hash)
     print(json.dumps({
         "ok": True,
         "resume_guard": state,
-        "additional_context": ritual_prompt(),
+        "additional_context": ritual_prompt(dossier_hash),
     }, ensure_ascii=False, separators=(",", ":")))
 
 

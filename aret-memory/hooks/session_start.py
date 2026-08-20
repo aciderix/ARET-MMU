@@ -12,7 +12,8 @@ from resume_guard import arm, ritual_prompt
 
 def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
     context = store.get_resume_context(journal_limit=8, rule_limit=12, excerpt_bytes=260)
-    guard = arm(store.memory_dir, payload, reason="SessionStart")
+    dossier_hash = context["resume_dossier"]["contract_hash"]
+    guard = arm(store.memory_dir, payload, reason="SessionStart", resume_contract_hash=dossier_hash)
     catalog = pipeline_catalog()
     pipeline_summary = {
         policy: [item["name"] for item in items]
@@ -26,11 +27,12 @@ def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
             "reason": guard["reason"],
             "status": guard["status"],
             "required_sections": guard["required_fields"],
+            "resume_contract_hash": guard["resume_contract_hash"],
         },
         "resume_ritual": {
             "required": True,
             "tool": "aret_acknowledge_resume",
-            "prompt": ritual_prompt(),
+            "prompt": ritual_prompt(dossier_hash),
         },
         "pipeline_catalog": pipeline_summary,
         "toolchain_status": toolchain_status(Path(__file__).resolve().parents[2]),

@@ -33,14 +33,16 @@ Toutes les adresses sont validées et canoniques. `aret_read` peut lire chacune 
 
 ## Outils MCP actuels
 
-Le serveur déclare **40 outils métier**.
+Le serveur déclare **43 outils métier**.
 
 | Outil | Mode | Contrat principal |
 |---|---|---|
 | `aret_boot` | Lecture | Doctrine, versions, chemins, mode écriture, HMAC et état de synchronisation. |
 | `aret_get_front` | Lecture | Active Front et adresses pertinentes. |
 | `aret_restore` | Lecture | Noyau de reprise borné : doctrine, versions et Front. |
-| `aret_get_resume_brief` | Lecture | Paquet de reprise : Front, règles, dernières entrées 71 et audit récent ; Git reste séparé en lecture seule. |
+| `aret_get_resume_brief` | Lecture | Vue de compatibilité pour investigation ciblée ; elle ne remplace pas le Resume Dossier injecté. |
+| `aret_get_resume_protocol` | Lecture | Pointeurs documentaires et protocole historique, sans relecture obligatoire. |
+| `aret_acknowledge_resume` | Lecture | Valide les six volets du rituel et exige le hash du Resume Dossier injecté. |
 | `aret_find` | Lecture | Découverte structurée/FTS sans contenu intégral. |
 | `aret_read` | Lecture | Lecture exacte d’une adresse ARET. |
 | `aret_read_batch` | Lecture | Lecture de plusieurs adresses connues sous bornes d’items et d’octets. |
@@ -52,6 +54,7 @@ Le serveur déclare **40 outils métier**.
 | `aret_append_knowledge` | Écriture | Création append-first, tags, provenance et liaisons de preuve contrôlées. |
 | `aret_update_front` | Écriture | Mise à jour partielle, bornée et auditée du Front. |
 | `aret_replace_front` | Écriture | Remplacement intégral et audité du Front, sans toucher à l’historique métier. |
+| `aret_prepare_handoff` | Écriture | Prépare atomiquement le handoff Front et initialise le playbook V5 tagué de façon idempotente. |
 | `aret_rebuild_front` | Écriture | Ajout prudent de pointeurs dérivés au Front. |
 | `aret_record_proof` | Écriture | Enregistrement d’une preuve et contrôle de son reçu HMAC. |
 | `aret_attach_proof` | Écriture | Liaison de preuve et promotion conditionnelle. |
@@ -89,6 +92,10 @@ Le serveur déclare **40 outils métier**.
 | Relations | `ACTIVE` par défaut ; une supersession marque l’ancien lien `SUPERSEDED` et conserve `superseded_by`. |
 | Roadmap | Les briques possèdent `milestone`, `target_platform` et `priority` (1–5) ; la vue roadmap reste dérivée de SQLite. |
 | Front | La clé `brick` ne peut référencer qu’une brique `ACTIVE`, jamais une brique seulement planifiée. |
+| Resume Dossier V1 | Cinq domaines `CORE_PLAYBOOK` obligatoires, handoff Front atomique, architecture sous tag `PLAYBOOK_SHARED_STACK` et aucune table supplémentaire. |
+| Fraîcheur de reprise | `handoff_front_hash` doit égaler le Front courant ; une divergence rend le dossier `STALE` et bloque l’injection. |
+| Bornes de reprise | Dossier ≤ 12 500 octets et contexte total ≤ 18 500 octets ; tout dépassement échoue explicitement, sans troncature. |
+| Confirmation de reprise | Les six champs de rituel et `resume_contract_hash` doivent correspondre au hash armé par SessionStart/PostCompact ; sinon la barrière reste active. |
 | Index | FTS5 entièrement reconstructible depuis `knowledge` et `knowledge_tag`. |
 | Artefacts | Chemin sous `artifacts/`, SHA-256 contrôlé avant lecture. |
 | Pipelines | Catalogue fermé, argv contrôlés, délais bornés et artefact hashé pour toute exécution réelle. |
@@ -101,7 +108,7 @@ Le serveur déclare **40 outils métier**.
 
 ## Intégrations opérationnelles
 
-Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` injecte le Front, les règles, les dernières entrées du journal 71, l’audit récent, le catalogue compact des pipelines et leurs derniers verdicts via `hookSpecificOutput.additionalContext`. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
+Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` et `PostCompact` construisent exclusivement depuis `knowledge`, `knowledge_tag` et `front_state` un Resume Dossier V1 à six sections fixes : playbook stable, handoff actif, adresses pertinentes, capacités/outils/portes, Git/limites et rituel. La macro `aret_prepare_handoff` initialise le playbook et écrit atomiquement les quatre champs de handoff, l’action suivante, les adresses chaudes et le hash du Front. Aucun document historique n’est injecté massivement ni relu par défaut. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
 
 Les adaptateurs d’oracle autorisés sont `difftest`, `transpilediff`, `stdcall_audit`, `winediff`, `winehash`, `ehdiff`, `gnuehdiff`, `funcdiff` et `cpudiff`. Ils ne prennent aucune commande shell arbitraire : les huit scripts et la commande Cargo CPU sont codés dans le catalogue fermé. Une dépendance absente produit `SKIPPED`; `winehash` produit une mesure `UNKNOWN` à comparer à un runner Windows et ne peut pas promouvoir une connaissance.
 

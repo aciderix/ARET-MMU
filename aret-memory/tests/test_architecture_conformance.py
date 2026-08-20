@@ -20,6 +20,26 @@ def signed_proof(store: MemoryStore) -> dict[str, object]:
     return store.record_proof(**payload, stdout_ref="", stderr_ref="", receipt_hmac=receipt["receipt_hmac"], actor="test")
 
 
+def _ready_dossier(front: dict[str, object]) -> dict[str, object]:
+    return {
+        "ready": True,
+        "contract_hash": "fixture-contract",
+        "prepared_at": "2026-08-20T00:00:00Z",
+        "playbook": {"entries": [{
+            "title": "Règle fixture", "domains": ["PLAYBOOK_FOUNDATION"],
+            "address": "ARET://knowledge/CORE-0001", "content": "Juste ou arrêt bruyant.",
+        }]},
+        "handoff": {
+            "handoff_work_summary": "Fixture de contexte prête.",
+            "handoff_verified_results": "Les tests de fixture sont disponibles.",
+            "handoff_open_risks": "Aucun risque de fixture.",
+            "handoff_deferred_items": "Aucun différé de fixture.",
+            "next_action": "Vérifier l’enveloppe du hook.",
+        },
+        "front": front,
+    }
+
+
 def populated_store(tmp_path: Path) -> tuple[MemoryStore, str]:
     store = MemoryStore(tmp_path / "memory", write_enabled=True, proof_hmac_secret="audit-secret")
     store.register_component("CORE", "Core <unsafe>", "Test", "test")
@@ -47,7 +67,7 @@ def test_restore_and_rebuild_front_are_compact_and_deterministic(tmp_path: Path)
     assert restored["front_address"] == "ARET://front/current"
     rebuilt = store.rebuild_front("test")
     assert f"ARET://knowledge/{knowledge_id}" in rebuilt["derived_addresses"]
-    context = additional_context({**restored, "front": rebuilt["front"]})
+    context = additional_context({**restored, "front": rebuilt["front"], "resume_dossier": _ready_dossier(rebuilt["front"])})
     assert "ARET-MMU" in context
     assert len(context) < 10_000
 
@@ -88,9 +108,10 @@ def test_compaction_checkpoints_are_audited_without_creating_knowledge(tmp_path:
 
 
 def test_sessionstart_context_uses_official_hook_envelope(tmp_path: Path) -> None:
+    front = {"state": {"subsystem": {"value": "EH"}}, "relevant_addresses": ["ARET://knowledge/EH-0001"]}
     restored = {
         "doctrine": "SQLite canonique.", "memory_format_version": "3", "policy_version": "1",
-        "front": {"state": {"subsystem": {"value": "EH"}}, "relevant_addresses": ["ARET://knowledge/EH-0001"]},
+        "front": front, "resume_dossier": _ready_dossier(front),
     }
     context = additional_context(restored)
     envelope = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}

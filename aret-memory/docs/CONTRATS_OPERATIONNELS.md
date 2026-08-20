@@ -8,7 +8,7 @@ Les opérations de session, de synchronisation et de transport mémoire sont **d
 
 | Domaine | Règle actuelle |
 |---|---|
-| Hooks | Lecture seule par défaut. `SessionStart` et `PostCompact` arment une barrière de reprise ; les checkpoints exigent `ARET_HOOK_WRITE_ENABLED=true`. |
+| Hooks | Lecture seule par défaut. `SessionStart` et `PostCompact` injectent un Resume Dossier V1 prêt puis arment une barrière liée à son hash ; les checkpoints exigent `ARET_HOOK_WRITE_ENABLED=true`. |
 | Front | `update_front` modifie un sous-ensemble ; `replace_front` remplace le contexte chaud et conserve l’état précédent dans l’audit. |
 | Git | Les commits sont limités à `.aret-memory/`. Toute modification hors périmètre refuse le commit mémoire. |
 | WAL | Checkpoint `TRUNCATE` avant commit Git et export de bundle ; un SQLite occupé bloque l’opération concernée. |
@@ -24,14 +24,14 @@ Les opérations de session, de synchronisation et de transport mémoire sont **d
 
 | Événement | Lanceur installé | Comportement |
 |---|---|---|
-| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Arme la barrière et injecte depuis SQLite doctrine, Front, règles, roadmap, journal 71, audit, assets, Git et pipelines. |
+| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Vérifie et injecte le Resume Dossier V1, puis arme une barrière liée à son empreinte. |
 | `PreCompact` | `.claude/hooks/aret-mmu-pre-compact.sh` | Retourne Front, audit récent borné et contexte de reprise ; checkpoint seulement sur activation. |
-| `PostCompact` | `.claude/hooks/aret-mmu-post-compact.sh` | Arme à nouveau la barrière et réinjecte le même paquet de reprise ; trace optionnelle de compaction. |
+| `PostCompact` | `.claude/hooks/aret-mmu-post-compact.sh` | Réinjecte un Resume Dossier V1 fraîchement vérifié et réarme une barrière liée à son empreinte ; trace optionnelle de compaction. |
 | `PreToolUse` | `.claude/hooks/aret-mmu-resume-pre-tool.sh` | Refuse tout outil sauf `aret_acknowledge_resume` tant que le récapitulatif rituel n’est pas confirmé. |
-| `PostToolUse` | `.claude/hooks/aret-mmu-resume-post-tool.sh` | Valide la confirmation MCP du rituel et lève la barrière pour cette session. |
+| `PostToolUse` | `.claude/hooks/aret-mmu-resume-post-tool.sh` | Ne lève la barrière que si les six volets sont valides et si le hash transmis égale le contrat injecté. |
 | `Stop` | `.claude/hooks/aret-mmu-resume-stop.sh` | Fournit une relance unique lorsque l’agent tente de conclure sans récapitulatif confirmé. |
 
-`SessionStart` injecte depuis SQLite la doctrine, les valeurs du Front, des extraits des règles actives, la roadmap, les dernières entrées du journal 71, l’audit, les assets, la branche Git, les commits récents, l’état de l’arbre, les outils MCP et le catalogue de pipelines. Les documents Markdown étant déjà ingérés, aucune relecture systématique n’est exigée. Après `SessionStart` ou `PostCompact`, l’agent rédige le récapitulatif des règles, de l’état, des capacités, de Git, des limites et de la prochaine action, puis appelle `aret_acknowledge_resume`. L’état du garde est éphémère sous `.aret-memory/runtime/resume_guard/`, donc n’est ni une connaissance SQLite ni une donnée Git. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
+`SessionStart` et `PostCompact` n’injectent ni historique massif ni extraits sélectionnés par date. Ils exigent et formatent un **Resume Dossier V1** à six sections fixes : playbook stable, handoff actif, adresses pertinentes, capacités/outils/portes, Git/limites/garde-fous et rituel. Le playbook utilise exclusivement `knowledge` et `knowledge_tag` : ses cinq domaines obligatoires sont `PLAYBOOK_FOUNDATION`, `PLAYBOOK_METHOD`, `PLAYBOOK_ARCHITECTURE` avec `PLAYBOOK_SHARED_STACK`, `PLAYBOOK_GATES` et `PLAYBOOK_TOOLING`, tous sous le tag `CORE_PLAYBOOK`. Le handoff utilise `front_state` et est préparé transactionnellement par `aret_prepare_handoff`. Son `handoff_front_hash` doit égaler le hash du Front courant, faute de quoi le dossier est `STALE` et le hook échoue bruyamment. Le dossier est borné à 12 500 octets ; le contexte final est borné à 18 500 octets, sans troncature. Après injection, l’agent rédige les six volets du rituel et transmet également `resume_contract_hash` à `aret_acknowledge_resume`. `PostToolUse` compare cette valeur au hash armé pour la session ; toute divergence maintient la barrière. L’état du garde est éphémère sous `.aret-memory/runtime/resume_guard/`, donc n’est ni une connaissance SQLite ni une donnée Git. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
 
 ## Git mémoire local
 
@@ -79,7 +79,7 @@ python3 tests/mcp_integration_check.py
 python3 -m compileall -q aret_mmu_server.py core evidence hooks migration ops
 ```
 
-Les tests couvrent les hooks, la séparation FIND/READ, les preuves HMAC, le confinement Git depuis un Memory Store imbriqué, les checkpoints WAL, les bundles v3, les relations adressables et leur cycle de vie actif, le bootstrap de fonctions/briques/graphe et la réinitialisation auditée du Front. Le catalogue d’oracles couvre désormais neuf gates fermés. [1] [2]
+Les tests couvrent les hooks, la séparation FIND/READ, les preuves HMAC, le confinement Git depuis un Memory Store imbriqué, les checkpoints WAL, les bundles v3, les relations adressables et leur cycle de vie actif, le bootstrap de fonctions/briques/graphe, la réinitialisation auditée du Front, les cinq domaines du playbook, la fraîcheur du handoff et le refus d’une confirmation dont le hash ne correspond pas. Le catalogue d’oracles couvre désormais neuf gates fermés. [1] [2]
 
 ## Références
 

@@ -39,6 +39,29 @@ DEFAULT_MAX_BYTES = 65536
 HARD_MAX_ITEMS = 100
 HARD_MAX_BYTES = 262144
 
+# Resume Dossier V1 : vue opérationnelle compacte, dérivée exclusivement des
+# primitives V5 knowledge/knowledge_tag/front_state. Aucun document Markdown ni
+# résumé LLM n’est utilisé à la reprise.
+CORE_PLAYBOOK_TAG = "CORE_PLAYBOOK"
+PLAYBOOK_DOMAINS = (
+    "PLAYBOOK_FOUNDATION",
+    "PLAYBOOK_METHOD",
+    "PLAYBOOK_ARCHITECTURE",
+    "PLAYBOOK_GATES",
+    "PLAYBOOK_TOOLING",
+)
+HANDOFF_FIELDS = (
+    "handoff_work_summary",
+    "handoff_verified_results",
+    "handoff_open_risks",
+    "handoff_deferred_items",
+)
+HANDOFF_CONTROL_FIELDS = ("handoff_front_hash", "handoff_prepared_at")
+# Le dossier garde une réserve pour Git, capacités et rituel injectés par le hook.
+# La borne de transport globale reste 18 500 octets, sans troncature.
+RESUME_DOSSIER_MAX_BYTES = 12_500
+RESUME_DOSSIER_MIN_BYTES = 2_000
+
 
 class AretError(ValueError):
     """Erreur métier retournable sans ambiguïté au client MCP."""
@@ -376,6 +399,240 @@ class MemoryStore:
             "restore_contract": "FIND puis READ/READ_BATCH explicites pour les pages froides.",
         }
 
+    def _front_resume_hash(self, state: dict[str, dict[str, str]]) -> str:
+        """Hash des seules clés qui rendent un handoff métier périmé."""
+        included = {
+            key: str(record.get("value", ""))
+            for key, record in state.items()
+            if key in {"subsystem", "brick", "current_wall", "last_action", "next_action"}
+            or key in HANDOFF_FIELDS
+            or re.fullmatch(r"relevant_[1-5]_address", key)
+        }
+        return sha256_text(canonical_json(included))
+
+    def _resume_playbook_rows(self, conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        rows = [dict(row) for row in conn.execute(
+            """SELECT k.id,k.type,k.status,k.title,k.content,k.content_hash,k.updated_at,
+                      GROUP_CONCAT(kt.tag, ' ') AS tags
+               FROM knowledge k JOIN knowledge_tag core_tag
+                 ON core_tag.knowledge_id=k.id AND core_tag.tag=?
+               LEFT JOIN knowledge_tag kt ON kt.knowledge_id=k.id
+               WHERE k.status='ACTIVE' AND k.type IN ('RULE','ARCHITECTURE')
+               GROUP BY k.id
+               ORDER BY k.id""",
+            (CORE_PLAYBOOK_TAG,),
+        ).fetchall()]
+        for row in rows:
+            tags = set(str(row.pop("tags") or "").split())
+            domains = [domain for domain in PLAYBOOK_DOMAINS if domain in tags]
+            row["domains"] = domains
+            row["address"] = make_address("knowledge", str(row["id"]))
+        return rows
+
+    def _bootstrap_resume_playbook(self, actor: str) -> dict[str, Any]:
+        """Marque le noyau V5 du playbook et crée uniquement la règle dérivée absente.
+
+        Cette opération est idempotente, auditée et n'introduit aucune nouvelle
+        table. Les entrées importées restent les sources ; la règle dérivée rend
+        explicite le modèle shared-stack, précédemment réparti dans plusieurs pages.
+        """
+        self._require_write()
+        selections = {
+            "CORE-0001": "PLAYBOOK_FOUNDATION",
+            "CORE-0005": "PLAYBOOK_METHOD",
+            "INDUS-0013": "PLAYBOOK_GATES",
+            "CORPUS-0006": "PLAYBOOK_TOOLING",
+            "ARCH-0009": "PLAYBOOK_ARCHITECTURE",
+        }
+        tagged: list[str] = []
+        with self._read_connection() as conn:
+            existing_domains = {
+                str(row["tag"])
+                for row in conn.execute(
+                    """SELECT DISTINCT domain_tag.tag
+                       FROM knowledge k JOIN knowledge_tag core_tag
+                         ON core_tag.knowledge_id=k.id AND core_tag.tag=?
+                       JOIN knowledge_tag domain_tag ON domain_tag.knowledge_id=k.id
+                       WHERE k.status='ACTIVE' AND domain_tag.tag IN (?, ?, ?, ?, ?)""",
+                    (CORE_PLAYBOOK_TAG, *PLAYBOOK_DOMAINS),
+                ).fetchall()
+            }
+            has_shared_stack = conn.execute(
+                """SELECT 1 FROM knowledge k JOIN knowledge_tag kt ON kt.knowledge_id=k.id
+                   WHERE k.status='ACTIVE' AND kt.tag='PLAYBOOK_SHARED_STACK' LIMIT 1"""
+            ).fetchone() is not None
+        if existing_domains == set(PLAYBOOK_DOMAINS) and has_shared_stack:
+            return {"tagged": [], "tag": CORE_PLAYBOOK_TAG, "already_ready": True}
+        with self._transaction() as conn:
+            for knowledge_id, domain in selections.items():
+                row = conn.execute(
+                    "SELECT id,type,status FROM knowledge WHERE id=?", (knowledge_id,)
+                ).fetchone()
+                if row is None or row["status"] != "ACTIVE" or row["type"] not in {"RULE", "ARCHITECTURE"}:
+                    raise AretError(f"Entrée playbook V5 indisponible ou inactive : {knowledge_id}")
+                for tag in (CORE_PLAYBOOK_TAG, domain):
+                    conn.execute("INSERT OR IGNORE INTO knowledge_tag(knowledge_id, tag) VALUES(?, ?)", (knowledge_id, tag))
+                tagged.append(knowledge_id)
+            self._audit(
+                conn, actor=actor, operation="BOOTSTRAP_RESUME_PLAYBOOK", entity_type="playbook",
+                entity_id="CORE_PLAYBOOK", after={"knowledge_ids": tagged, "domains": list(PLAYBOOK_DOMAINS)},
+            )
+        derived_address: str | None = None
+        if not has_shared_stack:
+            derived = self.append_knowledge(
+                knowledge_type="ARCHITECTURE",
+                status="ACTIVE",
+                title="Playbook : modèle shared-stack et limites de portabilité",
+                content=(
+                    "Modèle shared-stack : esp est transmis par valeur à travers les appels liftés ; "
+                    "ebp est un registre-paramètre threadé et la pile machine n’est pas la source de vérité "
+                    "pour l’unwind. Toute fonctionnalité incompatible avec ce modèle doit aborter sound plutôt que "
+                    "simuler un comportement. Wine reste une source de construction et un oracle, jamais une "
+                    "dépendance au runtime ; le résultat ARET demeure ELF ou WASM natif. Pour WASM, les capacités "
+                    "absentes doivent être explicitement refusées plutôt que diverger silencieusement."
+                ),
+                component_id="ARCH",
+                function_id=None,
+                brick_id=None,
+                tags=[CORE_PLAYBOOK_TAG, "PLAYBOOK_ARCHITECTURE", "PLAYBOOK_SHARED_STACK", "DERIVED_PLAYBOOK"],
+                proof_ids=[],
+                supersedes_id=None,
+                actor=actor,
+                rebuild_index=False,
+            )
+            derived_id = str(derived["id"])
+            for source_id in ("ARCH-0009", "FIBER-0001"):
+                try:
+                    self.add_relation(derived_id, "DERIVED_FROM", source_id, actor)
+                except NotFoundError:
+                    continue
+            self.rebuild_index(actor)
+            derived_address = str(derived["address"])
+        return {"tagged": tagged, "tag": CORE_PLAYBOOK_TAG, "derived_address": derived_address}
+
+    @staticmethod
+    def _handoff_value(label: str, value: str, minimum: int = 24) -> str:
+        text = str(value).strip()
+        if len(text) < minimum:
+            raise AretError(f"{label} est trop court pour un handoff fiable")
+        if len(text.encode("utf-8")) > 1_000:
+            raise AretError(f"{label} dépasse la borne de 1000 octets")
+        return text
+
+    def prepare_handoff(
+        self,
+        *,
+        work_summary: str,
+        verified_results: str,
+        open_risks: str,
+        deferred_items: str,
+        next_action: str,
+        relevant_addresses: Sequence[str] | None,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Met à jour atomiquement le handoff actif et assure le playbook V5 tagué."""
+        self._require_write()
+        self._bootstrap_resume_playbook(actor)
+        addresses: list[str] = []
+        for raw in list(relevant_addresses or []):
+            try:
+                parsed = parse_address(str(raw))
+            except ValueError as exc:
+                raise AretError("Chaque adresse chaude du handoff doit être une adresse ARET valide") from exc
+            if parsed.resource_type != "knowledge":
+                raise AretError("Les adresses chaudes du handoff doivent viser des connaissances ARET")
+            addresses.append(parsed.canonical)
+        if len(set(addresses)) != len(addresses) or len(addresses) > 5:
+            raise AretError("Le handoff accepte entre zéro et cinq adresses chaudes distinctes")
+        values = {
+            "handoff_work_summary": self._handoff_value("work_summary", work_summary),
+            "handoff_verified_results": self._handoff_value("verified_results", verified_results),
+            "handoff_open_risks": self._handoff_value("open_risks", open_risks),
+            "handoff_deferred_items": self._handoff_value("deferred_items", deferred_items),
+            "next_action": self._handoff_value("next_action", next_action),
+        }
+        with self._transaction() as conn:
+            for address in addresses:
+                knowledge_id = parse_address(address).identifier
+                if not conn.execute("SELECT 1 FROM knowledge WHERE id=?", (knowledge_id,)).fetchone():
+                    raise NotFoundError(f"Adresse chaude introuvable : {address}")
+            before = self._front_rows(conn)
+            for index in range(1, 6):
+                key = f"relevant_{index}_address"
+                if index <= len(addresses):
+                    values[key] = addresses[index - 1]
+                elif key in before:
+                    values[key] = ""
+            prospective = {**before, **{key: {"value": value} for key, value in values.items()}}
+            handoff_hash = self._front_resume_hash(prospective)
+            stamp = utc_now()
+            values["handoff_front_hash"] = handoff_hash
+            values["handoff_prepared_at"] = stamp
+            self._validate_front_brick(conn, values)
+            conn.executemany(
+                """INSERT INTO front_state(key,value,updated_at,updated_by) VALUES(?,?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by""",
+                [(key, value, stamp, actor) for key, value in sorted(values.items())],
+            )
+            after = self._front_rows(conn)
+            self._audit(
+                conn, actor=actor, operation="PREPARE_HANDOFF", entity_type="front", entity_id="current",
+                before=before, after={"front": after, "handoff_hash": handoff_hash, "addresses": addresses},
+            )
+        return self.get_resume_dossier()
+
+    def get_resume_dossier(self) -> dict[str, Any]:
+        """Construit le Resume Dossier V1 et échoue logiquement si son contrat manque ou est périmé."""
+        with self._read_connection() as conn:
+            front = self.get_front()
+            state = front["state"]
+            playbook = self._resume_playbook_rows(conn)
+            present_domains = {domain for item in playbook for domain in item["domains"]}
+            errors = [f"Domaine playbook absent : {domain}" for domain in PLAYBOOK_DOMAINS if domain not in present_domains]
+            handoff = {key: str(state.get(key, {}).get("value", "")) for key in HANDOFF_FIELDS}
+            missing_handoff = [key for key, value in handoff.items() if not value]
+            if missing_handoff:
+                errors.append("Handoff incomplet : " + ", ".join(missing_handoff))
+            if not str(state.get("next_action", {}).get("value", "")):
+                errors.append("Handoff incomplet : next_action")
+            stored_hash = str(state.get("handoff_front_hash", {}).get("value", ""))
+            current_hash = self._front_resume_hash(state)
+            if stored_hash and stored_hash != current_hash:
+                errors.append("Handoff périmé : le Front a changé depuis sa préparation")
+            if not stored_hash:
+                errors.append("Handoff incomplet : handoff_front_hash")
+            contract = {
+                "playbook": [{key: item[key] for key in ("id", "type", "title", "content", "content_hash", "domains", "address")} for item in playbook],
+                "handoff": {**handoff, "next_action": str(state.get("next_action", {}).get("value", ""))},
+                "front": front,
+                "prepared_at": str(state.get("handoff_prepared_at", {}).get("value", "")),
+            }
+            contract_hash = sha256_text(canonical_json(contract))
+            # Le Front complet sert à l’audit et au hash ; il ne doit pas être compté
+            # deux fois dans le budget du texte injecté, qui rend déjà le handoff et
+            # les adresses une seule fois.
+            budget_payload = {
+                "playbook": [{key: item[key] for key in ("id", "title", "content", "domains", "address")} for item in playbook],
+                "handoff": contract["handoff"],
+                "relevant_addresses": front["relevant_addresses"],
+            }
+            size_bytes = len(canonical_json(budget_payload).encode("utf-8"))
+            if size_bytes > RESUME_DOSSIER_MAX_BYTES:
+                errors.append(f"Resume Dossier dépasse {RESUME_DOSSIER_MAX_BYTES} octets")
+            if playbook and size_bytes < RESUME_DOSSIER_MIN_BYTES:
+                errors.append(f"Resume Dossier sous le plancher de {RESUME_DOSSIER_MIN_BYTES} octets")
+        return {
+            "ready": not errors,
+            "errors": errors,
+            "playbook": {"tag": CORE_PLAYBOOK_TAG, "domains": list(PLAYBOOK_DOMAINS), "entries": playbook},
+            "handoff": {**handoff, "next_action": contract["handoff"]["next_action"]},
+            "front": front,
+            "prepared_at": contract["prepared_at"],
+            "contract_hash": contract_hash,
+            "size_bytes": size_bytes,
+            "max_bytes": RESUME_DOSSIER_MAX_BYTES,
+        }
+
     def get_resume_brief(self, journal_limit: int = 8, rule_limit: int = 20, audit_limit: int = 12) -> dict[str, Any]:
         """Vue de reprise bornée : Front, règles actives, dernières entrées du journal 71 et audit récent.
 
@@ -411,47 +668,29 @@ class MemoryStore:
         }
 
     def get_resume_context(self, journal_limit: int = 8, rule_limit: int = 12, excerpt_bytes: int = 480) -> dict[str, Any]:
-        """Construit le contexte automatique de reprise depuis SQLite, sans relecture de Markdown.
+        """Construit le contexte à partir du Resume Dossier V1, jamais par extraits récents.
 
-        Le paquet contient des extraits déterministes des règles et du journal, le Front,
-        l’audit, la roadmap et les assets. Les bornes empêchent l’injection de masquer la
-        suite du contexte par une charge documentaire excessive.
+        Les paramètres historiques sont conservés pour compatibilité de transport, mais
+        aucune sélection par date ni troncature de contenu n’est admise dans le dossier.
         """
-        if isinstance(excerpt_bytes, bool) or not isinstance(excerpt_bytes, int) or excerpt_bytes < 120 or excerpt_bytes > 1200:
-            raise AretError("excerpt_bytes doit être compris entre 120 et 1200")
-        brief = self.get_resume_brief(journal_limit=journal_limit, rule_limit=rule_limit, audit_limit=12)
-        rule_ids = [str(item["id"]) for item in brief["rules"]]
-        journal_ids = [str(item["id"]) for item in brief["latest_document_71_entries"]]
-        ids = list(dict.fromkeys(rule_ids + journal_ids))
-        content_by_id: dict[str, str] = {}
-        if ids:
-            placeholders = ",".join("?" for _ in ids)
-            with self._read_connection() as conn:
-                rows = conn.execute(f"SELECT id,content FROM knowledge WHERE id IN ({placeholders})", ids).fetchall()
-            content_by_id = {str(row["id"]): str(row["content"]) for row in rows}
-
-        def enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            enriched: list[dict[str, Any]] = []
-            for item in items:
-                row = dict(item)
-                text = " ".join(content_by_id.get(str(row["id"]), "").split())
-                if len(text.encode("utf-8")) > excerpt_bytes:
-                    encoded = text.encode("utf-8")[:excerpt_bytes]
-                    text = encoded.decode("utf-8", errors="ignore").rstrip() + " …"
-                row["content_excerpt"] = text
-                enriched.append(row)
-            return enriched
-
-        roadmap = self.get_roadmap(max_items=16)
-        assets = self.get_assets(limit=12)["assets"]
+        dossier = self.get_resume_dossier()
+        if not dossier["ready"]:
+            raise AretError("Resume Dossier indisponible : " + " ; ".join(str(item) for item in dossier["errors"]))
+        with self._read_connection() as conn:
+            audit = [dict(row) for row in conn.execute(
+                """SELECT id,timestamp,actor,operation,entity_type,entity_id
+                   FROM audit_event ORDER BY timestamp DESC, id DESC LIMIT 8"""
+            ).fetchall()]
         return {
-            **brief["restore"],
-            "rules": enrich(brief["rules"]),
-            "latest_document_71_entries": enrich(brief["latest_document_71_entries"]),
-            "recent_audit": brief["recent_audit"],
-            "roadmap": roadmap,
-            "assets": assets,
-            "notice": "Paquet de reprise injecté depuis SQLite canonique ; aucun document source ne doit être relu avant le récapitulatif rituel.",
+            **self.restore(),
+            "resume_dossier": dossier,
+            "recent_audit": audit,
+            "roadmap": self.get_roadmap(max_items=12),
+            "assets": self.get_assets(limit=8)["assets"],
+            "notice": (
+                "Resume Dossier V1 injecté depuis SQLite canonique. Il contient le playbook stable et le handoff "
+                "actif contractuels ; aucun document source ne doit être relu avant le récapitulatif rituel."
+            ),
         }
 
     def get_resume_protocol(self, journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:
