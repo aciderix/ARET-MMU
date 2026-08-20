@@ -224,10 +224,16 @@ def aret_prepare_handoff(
     open_risks: str,
     deferred_items: str,
     next_action: str,
+    technical_checkpoint_state: str,
+    technical_target: str = "",
+    technical_change: str = "",
+    execution_state: str = "",
+    last_validation: str = "",
+    immediate_actions: str = "",
     relevant_addresses: list[str] | None = None,
     actor: str = "mcp-agent",
 ) -> dict[str, Any]:
-    """Prépare atomiquement le handoff actif et initialise le playbook V5 tagué si nécessaire avant une pause ou compaction."""
+    """Prépare atomiquement le handoff et le checkpoint V1.2 ; NONE interdit tout contenu technique inventé, ACTIVE exige les cinq faits bornés."""
     return _call(
         "prepare_handoff",
         work_summary=work_summary,
@@ -235,6 +241,12 @@ def aret_prepare_handoff(
         open_risks=open_risks,
         deferred_items=deferred_items,
         next_action=next_action,
+        technical_checkpoint_state=technical_checkpoint_state,
+        technical_target=technical_target,
+        technical_change=technical_change,
+        execution_state=execution_state,
+        last_validation=last_validation,
+        immediate_actions=immediate_actions,
         relevant_addresses=relevant_addresses,
         actor=actor,
     )

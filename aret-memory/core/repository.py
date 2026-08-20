@@ -57,6 +57,22 @@ HANDOFF_FIELDS = (
     "handoff_deferred_items",
 )
 HANDOFF_CONTROL_FIELDS = ("handoff_front_hash", "handoff_prepared_at")
+TECHNICAL_CHECKPOINT_STATE_FIELD = "handoff_technical_checkpoint_state"
+TECHNICAL_CHECKPOINT_FIELDS = (
+    "handoff_technical_target",
+    "handoff_technical_change",
+    "handoff_execution_state",
+    "handoff_last_validation",
+    "handoff_immediate_actions",
+)
+TECHNICAL_CHECKPOINT_STATES = {"NONE", "ACTIVE"}
+TECHNICAL_CHECKPOINT_MAX_BYTES = {
+    "handoff_technical_target": 120,
+    "handoff_technical_change": 160,
+    "handoff_execution_state": 130,
+    "handoff_last_validation": 160,
+    "handoff_immediate_actions": 180,
+}
 # Le dossier garde une réserve pour Git, capacités et rituel injectés par le hook.
 # La borne de transport globale reste 18 500 octets, sans troncature.
 RESUME_DOSSIER_MAX_BYTES = 12_500
@@ -404,8 +420,9 @@ class MemoryStore:
         included = {
             key: str(record.get("value", ""))
             for key, record in state.items()
-            if key in {"subsystem", "brick", "current_wall", "last_action", "next_action"}
+            if key in {"subsystem", "brick", "current_wall", "last_action", "next_action", TECHNICAL_CHECKPOINT_STATE_FIELD}
             or key in HANDOFF_FIELDS
+            or key in TECHNICAL_CHECKPOINT_FIELDS
             or re.fullmatch(r"relevant_[1-5]_address", key)
         }
         return sha256_text(canonical_json(included))
@@ -519,6 +536,23 @@ class MemoryStore:
             raise AretError(f"{label} dépasse la borne de 1000 octets")
         return text
 
+    @staticmethod
+    def _technical_checkpoint_value(key: str, value: str) -> str:
+        text = str(value).strip()
+        if not text:
+            raise AretError(f"Checkpoint technique incomplet : {key}")
+        maximum = TECHNICAL_CHECKPOINT_MAX_BYTES[key]
+        if len(text.encode("utf-8")) > maximum:
+            raise AretError(f"{key} dépasse la borne de {maximum} octets")
+        return text
+
+    @staticmethod
+    def _technical_checkpoint_state(value: str) -> str:
+        state = str(value).strip().upper()
+        if state not in TECHNICAL_CHECKPOINT_STATES:
+            raise AretError("technical_checkpoint_state doit être NONE ou ACTIVE")
+        return state
+
     def prepare_handoff(
         self,
         *,
@@ -527,10 +561,16 @@ class MemoryStore:
         open_risks: str,
         deferred_items: str,
         next_action: str,
-        relevant_addresses: Sequence[str] | None,
-        actor: str,
+        technical_checkpoint_state: str,
+        technical_target: str = "",
+        technical_change: str = "",
+        execution_state: str = "",
+        last_validation: str = "",
+        immediate_actions: str = "",
+        relevant_addresses: Sequence[str] | None = None,
+        actor: str = "mcp-agent",
     ) -> dict[str, Any]:
-        """Met à jour atomiquement le handoff actif, sans initialisation de playbook."""
+        """Met à jour atomiquement le handoff et son checkpoint technique V1.2, sans bootstrap."""
         self._require_write()
         addresses: list[str] = []
         for raw in list(relevant_addresses or []):
@@ -550,6 +590,35 @@ class MemoryStore:
             "handoff_deferred_items": self._handoff_value("deferred_items", deferred_items),
             "next_action": self._handoff_value("next_action", next_action),
         }
+        checkpoint_state = self._technical_checkpoint_state(technical_checkpoint_state)
+        checkpoint_input = {
+            "handoff_technical_target": technical_target,
+            "handoff_technical_change": technical_change,
+            "handoff_execution_state": execution_state,
+            "handoff_last_validation": last_validation,
+            "handoff_immediate_actions": immediate_actions,
+        }
+        if checkpoint_state == "ACTIVE":
+            checkpoint = {
+                key: self._technical_checkpoint_value(key, value)
+                for key, value in checkpoint_input.items()
+            }
+            values.update(checkpoint)
+            values[TECHNICAL_CHECKPOINT_STATE_FIELD] = checkpoint_state
+            values["last_action"] = (
+                "Checkpoint technique actif : "
+                f"{checkpoint['handoff_technical_target']} — {checkpoint['handoff_technical_change']}"
+            )
+        else:
+            unexpected = [key for key, value in checkpoint_input.items() if str(value).strip()]
+            if unexpected:
+                raise AretError(
+                    "Checkpoint technique NONE incohérent : les champs doivent être vides ("
+                    + ", ".join(unexpected) + ")"
+                )
+            values.update({key: "" for key in TECHNICAL_CHECKPOINT_FIELDS})
+            values[TECHNICAL_CHECKPOINT_STATE_FIELD] = checkpoint_state
+            values["last_action"] = "Aucun checkpoint technique actif lors de la préparation du handoff."
         with self._transaction() as conn:
             for address in addresses:
                 knowledge_id = parse_address(address).identifier
@@ -594,6 +663,22 @@ class MemoryStore:
                 errors.append("Handoff incomplet : " + ", ".join(missing_handoff))
             if not str(state.get("next_action", {}).get("value", "")):
                 errors.append("Handoff incomplet : next_action")
+            checkpoint_state = str(state.get(TECHNICAL_CHECKPOINT_STATE_FIELD, {}).get("value", "")).strip().upper()
+            checkpoint = {
+                "state": checkpoint_state,
+                **{key: str(state.get(key, {}).get("value", "")) for key in TECHNICAL_CHECKPOINT_FIELDS},
+            }
+            if checkpoint_state not in TECHNICAL_CHECKPOINT_STATES:
+                errors.append("Checkpoint technique incomplet : handoff_technical_checkpoint_state")
+            elif checkpoint_state == "ACTIVE":
+                missing_checkpoint = [key for key in TECHNICAL_CHECKPOINT_FIELDS if not checkpoint[key]]
+                if missing_checkpoint:
+                    errors.append("Checkpoint technique incomplet : " + ", ".join(missing_checkpoint))
+                for key in TECHNICAL_CHECKPOINT_FIELDS:
+                    if len(checkpoint[key].encode("utf-8")) > TECHNICAL_CHECKPOINT_MAX_BYTES[key]:
+                        errors.append(f"Checkpoint technique invalide : {key} dépasse sa borne")
+            elif any(checkpoint[key] for key in TECHNICAL_CHECKPOINT_FIELDS):
+                errors.append("Checkpoint technique NONE incohérent : les champs doivent être vides")
             stored_hash = str(state.get("handoff_front_hash", {}).get("value", ""))
             current_hash = self._front_resume_hash(state)
             if stored_hash and stored_hash != current_hash:
@@ -602,7 +687,11 @@ class MemoryStore:
                 errors.append("Handoff incomplet : handoff_front_hash")
             contract = {
                 "playbook": [{key: item[key] for key in ("id", "type", "title", "content", "content_hash", "domains", "address")} for item in playbook],
-                "handoff": {**handoff, "next_action": str(state.get("next_action", {}).get("value", ""))},
+                "handoff": {
+                    **handoff,
+                    "next_action": str(state.get("next_action", {}).get("value", "")),
+                    "technical_checkpoint": checkpoint,
+                },
                 "front": front,
                 "prepared_at": str(state.get("handoff_prepared_at", {}).get("value", "")),
             }
@@ -624,7 +713,11 @@ class MemoryStore:
             "ready": not errors,
             "errors": errors,
             "playbook": {"tag": CORE_PLAYBOOK_TAG, "domains": list(PLAYBOOK_DOMAINS), "entries": playbook},
-            "handoff": {**handoff, "next_action": contract["handoff"]["next_action"]},
+            "handoff": {
+                **handoff,
+                "next_action": contract["handoff"]["next_action"],
+                "technical_checkpoint": checkpoint,
+            },
             "front": front,
             "prepared_at": contract["prepared_at"],
             "contract_hash": contract_hash,
@@ -687,7 +780,7 @@ class MemoryStore:
             "roadmap": self.get_roadmap(max_items=12),
             "assets": self.get_assets(limit=8)["assets"],
             "notice": (
-                "Resume Dossier V1 injecté depuis SQLite canonique. Il contient le playbook stable et le handoff "
+                "Resume Dossier V1.2 injecté depuis SQLite canonique. Il contient le playbook stable, le handoff et le checkpoint technique "
                 "actif contractuels ; aucun document source ne doit être relu avant le récapitulatif rituel."
             ),
         }

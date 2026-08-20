@@ -71,6 +71,7 @@ def _handoff(store: MemoryStore) -> dict[str, object]:
         open_risks="Aucun risque bloquant connu ; toute divergence doit produire un arrêt bruyant.",
         deferred_items="Aucun élément différé ne doit être traité avant la validation de la reprise active.",
         next_action="Exécuter le contrôle MCP puis confirmer le rituel de reprise avec le dossier injecté.",
+        technical_checkpoint_state="NONE",
         relevant_addresses=[],
         actor="test",
     )
@@ -91,6 +92,7 @@ def test_resume_dossier_requires_all_playbook_domains_and_handoff(tmp_path: Path
     assert dossier["playbook"]["domains"] == list(PLAYBOOK_DOMAINS)
     assert len(dossier["playbook"]["entries"]) == len(PLAYBOOK)
     assert dossier["handoff"]["next_action"].startswith("Exécuter le contrôle MCP")
+    assert dossier["handoff"]["technical_checkpoint"]["state"] == "NONE"
     assert dossier["contract_hash"]
 
 
@@ -103,6 +105,7 @@ def test_prepare_handoff_is_atomic_and_rejects_unaddressed_hot_context(tmp_path:
             open_risks="Risques ouverts explicitement décrits.",
             deferred_items="Éléments différés explicitement décrits.",
             next_action="Poursuivre avec une action atomique et vérifiable.",
+            technical_checkpoint_state="NONE",
             relevant_addresses=["pas-une-adresse"],
             actor="test",
         )
@@ -118,3 +121,62 @@ def test_resume_dossier_turns_stale_after_a_front_change(tmp_path: Path) -> None
     stale = store.get_resume_dossier()
     assert stale["ready"] is False
     assert any("périmé" in error for error in stale["errors"])
+
+
+def test_active_technical_checkpoint_is_atomic_hashed_and_updates_last_action(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dossier = store.prepare_handoff(
+        work_summary="Le changement technique précis est prêt à être transmis à la prochaine session sans relecture.",
+        verified_results="Aucun verdict nouveau n’est affirmé tant que les commandes de validation ne sont pas terminées.",
+        open_risks="Une divergence du build ou des gates doit bloquer toute conclusion de support technique.",
+        deferred_items="Les améliorations non liées au geste courant restent différées jusqu’au verdict des gates.",
+        next_action="Lire le verdict du build puis exécuter les deux validations différentielles prévues.",
+        technical_checkpoint_state="ACTIVE",
+        technical_target="lift.rs — cvtdq2pd",
+        technical_change="Les helpers absents sont remplacés par le helper entier vers double existant.",
+        execution_state="cargo build lancé ; verdict non encore observé à la préparation du handoff.",
+        last_validation="Aucun cpudiff ni funcdiff après ce correctif ; aucun PASS n’est revendiqué.",
+        immediate_actions="Lire cargo build, exécuter cpudiff, puis funcdiff.sh dans cet ordre.",
+        relevant_addresses=[],
+        actor="test",
+    )
+    checkpoint = dossier["handoff"]["technical_checkpoint"]
+    assert checkpoint["state"] == "ACTIVE"
+    assert checkpoint["handoff_technical_target"] == "lift.rs — cvtdq2pd"
+    assert "cvtdq2pd" in dossier["front"]["state"]["last_action"]["value"]
+    assert "helpers absents" in dossier["front"]["state"]["last_action"]["value"]
+
+    store.update_front({"handoff_technical_change": "Le correctif technique a été modifié après préparation."}, "test")
+    stale = store.get_resume_dossier()
+    assert stale["ready"] is False
+    assert any("périmé" in error for error in stale["errors"])
+
+
+def test_technical_checkpoint_rejects_incomplete_none_and_over_budget_values(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    common = {
+        "work_summary": "Résumé suffisamment détaillé de l’état de travail courant pour le contrat V1.2.",
+        "verified_results": "Résultats vérifiés et explicitement décrits sans inventer de verdict technique.",
+        "open_risks": "Risques ouverts explicitement décrits afin de préserver le comportement fail-closed.",
+        "deferred_items": "Éléments différés explicitement décrits sans les présenter comme déjà supportés.",
+        "next_action": "Poursuivre avec une action atomique et vérifiable après la reprise contrôlée.",
+        "relevant_addresses": [],
+        "actor": "test",
+    }
+    with pytest.raises(AretError, match="Checkpoint technique incomplet"):
+        store.prepare_handoff(technical_checkpoint_state="ACTIVE", **common)
+    with pytest.raises(AretError, match="NONE incohérent"):
+        store.prepare_handoff(technical_checkpoint_state="NONE", technical_target="Ne doit pas être enregistré.", **common)
+    with pytest.raises(AretError, match="dépasse la borne"):
+        store.prepare_handoff(
+            technical_checkpoint_state="ACTIVE",
+            technical_target="x" * 121,
+            technical_change="Changement factuel bref.",
+            execution_state="Aucun processus lancé.",
+            last_validation="Aucune validation nouvelle.",
+            immediate_actions="Préparer une action vérifiable.",
+            **common,
+        )
+    state = store.get_front()["state"]
+    assert "handoff_technical_checkpoint_state" not in state
+    assert "handoff_work_summary" not in state

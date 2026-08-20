@@ -91,6 +91,23 @@ def _compact_tool_groups() -> str:
     return " ; ".join(f"{group}: {', '.join(tools)}" for group, tools in MCP_TOOL_GROUPS.items())
 
 
+def _technical_checkpoint_lines(handoff: dict[str, Any]) -> list[str]:
+    checkpoint = handoff.get("technical_checkpoint", {}) if isinstance(handoff, dict) else {}
+    if not isinstance(checkpoint, dict) or checkpoint.get("state") == "NONE":
+        return [
+            "\\n### CHECKPOINT TECHNIQUE — GESTE INTERROMPU",
+            "Aucun checkpoint technique actif : aucun geste technique ne doit être inventé pour cette reprise.",
+        ]
+    return [
+        "\\n### CHECKPOINT TECHNIQUE — GESTE INTERROMPU",
+        "Cible exacte : " + str(checkpoint.get("handoff_technical_target", "")),
+        "Dernier changement : " + str(checkpoint.get("handoff_technical_change", "")),
+        "État d’exécution : " + str(checkpoint.get("handoff_execution_state", "")),
+        "Dernière validation : " + str(checkpoint.get("handoff_last_validation", "")),
+        "Actions immédiates : " + str(checkpoint.get("handoff_immediate_actions", "")),
+    ]
+
+
 def additional_context(result: dict[str, Any]) -> str:
     """Produit le dossier de reprise contractuel sans extrait arbitraire ni relecture Markdown."""
     dossier = result.get("resume_dossier")
@@ -127,6 +144,7 @@ def additional_context(result: dict[str, Any]) -> str:
         str(handoff.get("handoff_deferred_items", "")),
         "\n### Prochaine action atomique",
         str(handoff.get("next_action", "")),
+        *_technical_checkpoint_lines(handoff),
         "\n## 3. ADRESSES PERTINENTES",
     ])
     addresses = front.get("relevant_addresses", []) if isinstance(front, dict) else []

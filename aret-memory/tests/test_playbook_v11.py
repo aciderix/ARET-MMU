@@ -69,6 +69,7 @@ def _handoff(store: MemoryStore) -> None:
         open_risks="Une divergence du Front doit toujours rendre le handoff et le dossier périmés.",
         deferred_items="Aucun élément différé ne peut être présenté comme une capacité effectivement supportée.",
         next_action="Lire le dossier compact puis choisir une action atomique gardée par ses portes.",
+        technical_checkpoint_state="NONE",
         relevant_addresses=[],
         actor="test",
     )

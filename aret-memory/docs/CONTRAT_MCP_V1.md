@@ -54,7 +54,7 @@ Le serveur déclare **43 outils métier**.
 | `aret_append_knowledge` | Écriture | Création append-first, tags, provenance et liaisons de preuve contrôlées. |
 | `aret_update_front` | Écriture | Mise à jour partielle, bornée et auditée du Front. |
 | `aret_replace_front` | Écriture | Remplacement intégral et audité du Front, sans toucher à l’historique métier. |
-| `aret_prepare_handoff` | Écriture | Prépare atomiquement le handoff Front ; il ne crée ni ne vérifie de fiches de playbook. |
+| `aret_prepare_handoff` | Écriture | Prépare atomiquement le handoff, `last_action` et le checkpoint V1.2 ; aucun outil supplémentaire n’est créé. |
 | `aret_rebuild_front` | Écriture | Ajout prudent de pointeurs dérivés au Front. |
 | `aret_record_proof` | Écriture | Enregistrement d’une preuve et contrôle de son reçu HMAC. |
 | `aret_attach_proof` | Écriture | Liaison de preuve et promotion conditionnelle. |
@@ -92,8 +92,10 @@ Le serveur déclare **43 outils métier**.
 | Relations | `ACTIVE` par défaut ; une supersession marque l’ancien lien `SUPERSEDED` et conserve `superseded_by`. |
 | Roadmap | Les briques possèdent `milestone`, `target_platform` et `priority` (1–5) ; la vue roadmap reste dérivée de SQLite. |
 | Front | La clé `brick` ne peut référencer qu’une brique `ACTIVE`, jamais une brique seulement planifiée. |
-| Resume Dossier V1.1 | Cinq domaines `CORE_PLAYBOOK` obligatoires, fiches opérationnelles dérivées et compactes, handoff Front atomique, architecture sous tag `PLAYBOOK_SHARED_STACK` et aucune table supplémentaire. |
-| Fraîcheur de reprise | `handoff_front_hash` doit égaler le Front courant ; une divergence rend le dossier `STALE` et bloque l’injection. |
+| Resume Dossier V1.2 | Cinq domaines `CORE_PLAYBOOK` obligatoires, fiches opérationnelles dérivées compactes, handoff Front atomique et checkpoint technique conditionnel, sans table supplémentaire. |
+| Checkpoint technique | `NONE` impose les cinq champs vides et déclare qu’aucun geste ne doit être inventé ; `ACTIVE` exige cible, changement, état, dernière validation et actions immédiates, chacun sous borne. |
+| Cohérence du geste | `aret_prepare_handoff` écrit `last_action` avec le checkpoint actif, ou une absence explicite avec `NONE`, dans la même transaction. |
+| Fraîcheur de reprise | `handoff_front_hash` couvre le checkpoint et doit égaler le Front courant ; une divergence rend le dossier `STALE` et bloque l’injection. |
 | Bornes de reprise | Dossier ≤ 12 500 octets et contexte total ≤ 18 500 octets ; tout dépassement échoue explicitement, sans troncature. |
 | Confirmation de reprise | Les six champs de rituel et `resume_contract_hash` doivent correspondre au hash armé par SessionStart/PostCompact ; sinon la barrière reste active. |
 | Index | FTS5 entièrement reconstructible depuis `knowledge` et `knowledge_tag`. |
@@ -108,7 +110,7 @@ Le serveur déclare **43 outils métier**.
 
 ## Intégrations opérationnelles
 
-Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` et `PostCompact` sélectionnent exclusivement les connaissances `ACTIVE` taguées `CORE_PLAYBOOK`, puis construisent depuis `knowledge`, `knowledge_tag` et `front_state` un Resume Dossier V1.1 à six sections fixes : playbook stable, handoff actif, adresses pertinentes, capacités/outils/portes, Git/limites et rituel. Le bootstrap one-off `migration/bootstrap_playbook_v11.py` crée idempotemment les trois fiches dérivées et compactes de méthode, gates et diagnostic, avec relations `DERIVED_FROM` vers leurs sources historiques ; il n’est jamais appelé par un hook ni par `aret_prepare_handoff`. Cette macro écrit seulement les quatre champs de handoff, l’action suivante, les adresses chaudes et le hash du Front de façon atomique. Aucun document historique n’est injecté massivement ni relu par défaut. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
+Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` et `PostCompact` sélectionnent exclusivement les connaissances `ACTIVE` taguées `CORE_PLAYBOOK`, puis construisent depuis `knowledge`, `knowledge_tag` et `front_state` un Resume Dossier V1.2 à six sections fixes : playbook stable, handoff actif incluant un checkpoint technique conditionnel, adresses pertinentes, capacités/outils/portes, Git/limites et rituel. Le bootstrap one-off `migration/bootstrap_playbook_v11.py` crée idempotemment les trois fiches dérivées et compactes de méthode, gates et diagnostic, avec relations `DERIVED_FROM` vers leurs sources historiques ; il n’est jamais appelé par un hook ni par `aret_prepare_handoff`. Cette macro écrit atomiquement les quatre champs de handoff, l’action suivante, les adresses chaudes, l’état `NONE` ou `ACTIVE` du checkpoint, les cinq faits techniques et `last_action`, puis leur hash de fraîcheur commun. `NONE` est le seul état admissible lorsqu’aucun geste n’est actif ; aucun checkpoint ne peut être rétrospectivement fabriqué par migration. Aucun document historique n’est injecté massivement ni relu par défaut. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
 
 Les adaptateurs d’oracle autorisés sont `difftest`, `transpilediff`, `stdcall_audit`, `winediff`, `winehash`, `ehdiff`, `gnuehdiff`, `funcdiff` et `cpudiff`. Ils ne prennent aucune commande shell arbitraire : les huit scripts et la commande Cargo CPU sont codés dans le catalogue fermé. Une dépendance absente produit `SKIPPED`; `winehash` produit une mesure `UNKNOWN` à comparer à un runner Windows et ne peut pas promouvoir une connaissance.
 

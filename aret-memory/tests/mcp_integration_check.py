@@ -41,6 +41,16 @@ async def main() -> None:
             unexpected = names - required
             if missing or unexpected:
                 raise AssertionError(f"Inventaire MCP incohérent ; manquants={sorted(missing)}, inattendus={sorted(unexpected)}")
+            handoff_tool = next(tool for tool in tools.tools if tool.name == "aret_prepare_handoff")
+            handoff_properties = handoff_tool.input_schema.get("properties", {})
+            required_handoff_fields = {
+                "technical_checkpoint_state", "technical_target", "technical_change",
+                "execution_state", "last_validation", "immediate_actions",
+            }
+            if required_handoff_fields - set(handoff_properties):
+                raise AssertionError("Contrat MCP handoff V1.2 incomplet")
+            if "technical_checkpoint_state" not in set(handoff_tool.input_schema.get("required", [])):
+                raise AssertionError("technical_checkpoint_state doit être obligatoire")
             response = await session.call_tool("aret_boot", {})
             if not response.structured_content or response.structured_content.get("ok") is not True:
                 raise AssertionError(f"Réponse aret_boot inattendue : {response}")

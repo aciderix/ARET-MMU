@@ -61,6 +61,7 @@ def populated_store(memory_dir: Path) -> MemoryStore:
         open_risks="Aucun risque bloquant de fixture n’est connu.",
         deferred_items="Aucun élément de fixture n’est différé.",
         next_action="Exécuter le hook et confirmer le rituel de reprise.",
+        technical_checkpoint_state="NONE",
         relevant_addresses=["ARET://knowledge/CORE-0001"], actor="test",
     )
     return store

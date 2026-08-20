@@ -47,6 +47,7 @@ def _populated_store(memory_dir: Path) -> MemoryStore:
         open_risks="Aucun risque bloquant connu ; toute divergence doit interrompre la reprise.",
         deferred_items="Aucun élément différé ne doit masquer une action de reprise critique.",
         next_action="Produire le récapitulatif puis confirmer le rituel avec le dossier injecté.",
+        technical_checkpoint_state="NONE",
         relevant_addresses=addresses[:2], actor="test",
     )
     return store
