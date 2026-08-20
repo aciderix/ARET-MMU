@@ -33,13 +33,14 @@ Toutes les adresses sont validées et canoniques. `aret_read` peut lire chacune 
 
 ## Outils MCP actuels
 
-Le serveur déclare **32 outils métier**.
+Le serveur déclare **40 outils métier**.
 
 | Outil | Mode | Contrat principal |
 |---|---|---|
 | `aret_boot` | Lecture | Doctrine, versions, chemins, mode écriture, HMAC et état de synchronisation. |
 | `aret_get_front` | Lecture | Active Front et adresses pertinentes. |
 | `aret_restore` | Lecture | Noyau de reprise borné : doctrine, versions et Front. |
+| `aret_get_resume_brief` | Lecture | Paquet de reprise : Front, règles, dernières entrées 71 et audit récent ; Git reste séparé en lecture seule. |
 | `aret_find` | Lecture | Découverte structurée/FTS sans contenu intégral. |
 | `aret_read` | Lecture | Lecture exacte d’une adresse ARET. |
 | `aret_read_batch` | Lecture | Lecture de plusieurs adresses connues sous bornes d’items et d’octets. |
@@ -62,6 +63,13 @@ Le serveur déclare **32 outils métier**.
 | `aret_register_brick` | Écriture | Création d’une brique avec état, jalon, cible et priorité validés. |
 | `aret_update_brick` | Écriture | Mise à jour auditée d’état, jalon, cible et priorité ; refuse de désactiver une brique encore affichée dans le Front. |
 | `aret_run_oracle` | Écriture | Exécution d’un oracle de liste fermée, artefact et preuve. |
+| `aret_get_pipeline_catalog` | Lecture | Catalogue fermé des pipelines ARET, politiques, prérequis et délais. |
+| `aret_get_toolchain_status` | Lecture | État des dépendances ARET/Wine/MinGW/Rust/Unicorn/Clang/Z3. |
+| `aret_run_pipeline` | Opérationnel | Planifie ou exécute un pipeline ARET fermé ; `dry_run=true` par défaut et confirmations explicites selon politique. |
+| `aret_get_pipeline_runs` | Lecture | Derniers verdicts de pipeline sans charger leurs artefacts. |
+| `aret_read_pipeline_artifact` | Lecture | Lecture bornée et hashée d’un artefact de pipeline adressé. |
+| `aret_get_assets` | Lecture | Assets binaires, corpus et snapshots enregistrés avec hash et provenance. |
+| `aret_register_asset` | Écriture | Import local confirmé, copie sous Store, hash et audit. |
 | `aret_sync_memory` | Opérationnel | Auto-sync local selon `sync_policy.json`, jamais hors `.aret-memory/`. |
 | `aret_rebuild_index` | Écriture | Reconstruction FTS5 à partir du canonique. |
 | `aret_export_reference_91` | Export | Vue 91 dérivée du canonique ; elle ne remplace pas la provenance historique. |
@@ -83,13 +91,17 @@ Le serveur déclare **32 outils métier**.
 | Front | La clé `brick` ne peut référencer qu’une brique `ACTIVE`, jamais une brique seulement planifiée. |
 | Index | FTS5 entièrement reconstructible depuis `knowledge` et `knowledge_tag`. |
 | Artefacts | Chemin sous `artifacts/`, SHA-256 contrôlé avant lecture. |
+| Pipelines | Catalogue fermé, argv contrôlés, délais bornés et artefact hashé pour toute exécution réelle. |
+| Génération | `dry_run=true` par défaut ; `confirm_apply=true` obligatoire pour l’exécution générative. |
+| Réseau / sensible | Profils et sources fermés ; `confirm_network=true` ou `confirm_sensitive=true` obligatoire pour l’exécution réelle. |
+| Assets | Copie sous Store, provenance, SHA-256, taille maximale 2 GiB ; chemins hors dépôt/artefacts refusés. |
 | Pagination | Défaut : 20 objets / 65 536 octets ; plafond : 100 objets / 262 144 octets. |
 | WAL | Checkpoint `TRUNCATE` avant export de bundle et commit Git mémoire ; refus explicite si SQLite le signale occupé. |
 | Git | Fichiers WAL/SHM exclus par `.gitignore`; toute modification hors Memory Store refuse le commit mémoire. |
 
 ## Intégrations opérationnelles
 
-Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` injecte exclusivement le contexte minimal via `hookSpecificOutput.additionalContext`. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
+Les hooks Claude Code `SessionStart`, `PreCompact` et `PostCompact` sont installés dans `.claude/settings.json`. `SessionStart` injecte le Front, les règles, les dernières entrées du journal 71, l’audit récent, le catalogue compact des pipelines et leurs derniers verdicts via `hookSpecificOutput.additionalContext`. Les checkpoints de compaction ne sont écrits que si `ARET_HOOK_WRITE_ENABLED=true`; ils sont des événements d’audit, non des connaissances autoritatives.
 
 Les adaptateurs d’oracle autorisés sont `difftest`, `transpilediff`, `stdcall_audit`, `winediff`, `winehash`, `ehdiff`, `gnuehdiff`, `funcdiff` et `cpudiff`. Ils ne prennent aucune commande shell arbitraire : les huit scripts et la commande Cargo CPU sont codés dans le catalogue fermé. Une dépendance absente produit `SKIPPED`; `winehash` produit une mesure `UNKNOWN` à comparer à un runner Windows et ne peut pas promouvoir une connaissance.
 
@@ -104,3 +116,5 @@ Les adaptateurs d’oracle autorisés sont `difftest`, `transpilediff`, `stdcall
 [7]: ../migration/bootstrap_initial_graph.py "Bootstrap des symboles, relations et briques"
 [8]: ../schema/005_roadmap_bricks.sql "Métadonnées roadmap V1.1 des briques"
 [9]: ../migration/bootstrap_roadmap_v11.py "Classement idempotent des briques existantes"
+[10]: ../schema/006_pipeline_assets.sql "Assets et exécutions de pipeline canonisés"
+[11]: ../evidence/adapters/pipelines.py "Catalogue fermé, prévol, artefacts et confirmations"

@@ -78,8 +78,11 @@ def normalise_result(spec: OracleSpec, exit_code: int | None, stdout: str, stder
     if timed_out:
         return "ERROR"
     output = f"{stdout}\n{stderr}"
-    if re.search(r"^SKIP(?:PED)?\b", output, flags=re.MULTILINE):
-        return "SKIPPED"
+    # Un script peut signaler quelques fixtures SKIP tout en échouant globalement.
+    # Le code de sortie non nul reste alors un FAIL observable ; il ne doit jamais
+    # être masqué par une ligne SKIP partielle dans la sortie.
+    if exit_code is not None and exit_code != 0:
+        return "FAIL"
     if spec.name == "difftest":
         match = re.search(r"differential equivalence:\s*(\d+)\s*/\s*(\d+)\s+functions", output)
         if exit_code == 0 and match and int(match.group(1)) == int(match.group(2)) and int(match.group(2)) > 0:
@@ -109,8 +112,8 @@ def normalise_result(spec: OracleSpec, exit_code: int | None, stdout: str, stder
     elif spec.name == "winehash" and exit_code == 0 and re.search(r"\bOK\s+[0-9a-f]{64}\b", output):
         # Cette sortie est une mesure Wine à comparer au runner Windows, pas un gate de conformité.
         return "UNKNOWN"
-    if exit_code is not None and exit_code != 0:
-        return "FAIL"
+    if re.search(r"^SKIP(?:PED)?\b", output, flags=re.MULTILINE):
+        return "SKIPPED"
     return "ERROR"
 
 

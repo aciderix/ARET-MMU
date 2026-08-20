@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import external_aret_repository
 from evidence.adapters.oracles import ORACLES, normalise_result
 
 
-REPOSITORY = external_aret_repository()
+REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def test_closed_oracle_catalog_covers_project_gates_and_existing_sources() -> None:

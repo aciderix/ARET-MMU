@@ -8,6 +8,7 @@ import html
 import json
 import os
 import re
+import shutil
 import sqlite3
 import zipfile
 from contextlib import contextmanager
@@ -147,11 +148,19 @@ class MemoryStore:
                 ),
             }
             for key, value in defaults.items():
-                conn.execute(
-                    """INSERT INTO store_metadata(key, value, updated_at) VALUES(?, ?, ?)
-                       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
-                    (key, value, utc_now()),
-                )
+                current = conn.execute(
+                    "SELECT value FROM store_metadata WHERE key=?", (key,)
+                ).fetchone()
+                if current is None:
+                    conn.execute(
+                        "INSERT INTO store_metadata(key, value, updated_at) VALUES(?, ?, ?)",
+                        (key, value, utc_now()),
+                    )
+                elif current["value"] != value:
+                    conn.execute(
+                        "UPDATE store_metadata SET value=?, updated_at=? WHERE key=?",
+                        (value, utc_now(), key),
+                    )
 
     def _auto_sync_after_commit(self) -> None:
         """Synchronise après commit SQLite seulement si une politique locale l’active.
@@ -365,6 +374,96 @@ class MemoryStore:
             "front": front,
             "front_address": boot["front_address"],
             "restore_contract": "FIND puis READ/READ_BATCH explicites pour les pages froides.",
+        }
+
+    def get_resume_brief(self, journal_limit: int = 8, rule_limit: int = 20, audit_limit: int = 12) -> dict[str, Any]:
+        """Vue de reprise bornée : Front, règles actives, dernières entrées du journal 71 et audit récent.
+
+        Cette vue dérivée ne lit aucun Markdown brut ; elle expose uniquement les objets sourcés et adressables
+        du Store canonique. L’état Git reste volontairement hors SQLite.
+        """
+        for value, label, maximum in ((journal_limit, "journal_limit", 20), (rule_limit, "rule_limit", 40), (audit_limit, "audit_limit", 100)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > maximum:
+                raise AretError(f"{label} doit être compris entre 1 et {maximum}")
+        with self._read_connection() as conn:
+            rules = [dict(row) for row in conn.execute(
+                """SELECT id,title,status,updated_at FROM knowledge
+                   WHERE type='RULE' AND status IN ('ACTIVE','PROVEN','OBSERVED')
+                   ORDER BY updated_at DESC, id DESC LIMIT ?""", (rule_limit,)
+            ).fetchall()]
+            journal = [dict(row) for row in conn.execute(
+                """SELECT DISTINCT k.id,k.title,k.type,k.status,k.updated_at,ks.source_path,ks.source_start_line,ks.source_end_line
+                   FROM knowledge k JOIN knowledge_source ks ON ks.knowledge_id=k.id
+                   WHERE ks.source_path LIKE '%71-journal-de-bord.md'
+                   ORDER BY ks.source_start_line DESC, k.id DESC LIMIT ?""", (journal_limit,)
+            ).fetchall()]
+            audit = [dict(row) for row in conn.execute(
+                """SELECT id,timestamp,actor,operation,entity_type,entity_id
+                   FROM audit_event ORDER BY timestamp DESC, id DESC LIMIT ?""", (audit_limit,)
+            ).fetchall()]
+        for collection in (rules, journal):
+            for row in collection:
+                row["address"] = make_address("knowledge", row["id"])
+        return {
+            "restore": self.restore(), "rules": rules, "latest_document_71_entries": journal,
+            "recent_audit": audit,
+            "notice": "Les règles et entrées sont des pointeurs de reprise : utilisez READ/READ_BATCH pour leur contenu canonique intégral. Les commits Git sont fournis par le statut dépôt en lecture seule, jamais par SQLite.",
+        }
+
+    def get_resume_protocol(self, journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:
+        """Construit la lecture obligatoire après SessionStart ou compaction.
+
+        Les documents de méthode et d’industrialisation explicitement demandés sont représentés
+        par toutes leurs pages canonisées. Le journal 71 reste borné à ses dernières entrées.
+        Les lots respectent la limite READ_BATCH et ne contiennent jamais de contenu inventé.
+        """
+        if isinstance(journal_limit, bool) or not isinstance(journal_limit, int) or journal_limit < 1 or journal_limit > 20:
+            raise AretError("journal_limit doit être compris entre 1 et 20")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1 or batch_size > DEFAULT_MAX_ITEMS:
+            raise AretError(f"batch_size doit être compris entre 1 et {DEFAULT_MAX_ITEMS}")
+        sources = (
+            "docs/vision/70-reference-etat-methode-reste.md",
+            "docs/vision/80-orientations-architecturales.md",
+            "docs/vision/81-industrialisation.md",
+            "docs/vision/82-suivi-industrialisation.md",
+            "docs/vision/90-corpus-sources.md",
+        )
+        journal_source = "docs/vision/71-journal-de-bord.md"
+        with self._read_connection() as conn:
+            document_pages: dict[str, list[dict[str, Any]]] = {}
+            for source_path in sources:
+                rows = [dict(row) for row in conn.execute(
+                    """SELECT DISTINCT k.id,k.title,k.type,k.status,ks.source_start_line,ks.source_end_line
+                       FROM knowledge k JOIN knowledge_source ks ON ks.knowledge_id=k.id
+                       WHERE ks.source_path=? ORDER BY ks.source_start_line ASC,k.id ASC""", (source_path,)
+                ).fetchall()]
+                for row in rows:
+                    row["address"] = make_address("knowledge", row["id"])
+                document_pages[source_path] = rows
+            journal = [dict(row) for row in conn.execute(
+                """SELECT DISTINCT k.id,k.title,k.type,k.status,ks.source_start_line,ks.source_end_line
+                   FROM knowledge k JOIN knowledge_source ks ON ks.knowledge_id=k.id
+                   WHERE ks.source_path=? ORDER BY ks.source_start_line DESC,k.id DESC LIMIT ?""", (journal_source, journal_limit)
+            ).fetchall()]
+        for row in journal:
+            row["address"] = make_address("knowledge", row["id"])
+        required_addresses = [
+            row["address"] for source_path in sources for row in document_pages[source_path]
+        ] + [row["address"] for row in journal]
+        deduplicated = list(dict.fromkeys(required_addresses))
+        batches = [deduplicated[index:index + batch_size] for index in range(0, len(deduplicated), batch_size)]
+        return {
+            "protocol_version": 1,
+            "mandatory_documents": document_pages,
+            "latest_document_71_entries": journal,
+            "required_addresses": deduplicated,
+            "required_read_batches": batches,
+            "required_address_count": len(deduplicated),
+            "batch_count": len(batches),
+            "instructions": (
+                "Barrière de reprise : lire tous les lots avec aret_read_batch avant toute opération non liée à la reprise. "
+                "Les lectures sont contrôlées par le hook PreToolUse ; toute autre opération est refusée tant que la liste n’est pas épuisée."
+            ),
         }
 
     def register_component(self, component_id: str, title: str, description: str, actor: str) -> dict[str, Any]:
@@ -858,7 +957,7 @@ class MemoryStore:
         }
 
     def _entity_exists(self, conn: sqlite3.Connection, entity_id: str) -> bool:
-        tables = ("knowledge", "component", "function_symbol", "brick", "proof")
+        tables = ("knowledge", "component", "function_symbol", "brick", "proof", "asset", "pipeline_run")
         return any(conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (entity_id,)).fetchone() for table in tables)
 
     def add_relation(self, from_id: str, relation_type: str, to_id: str, actor: str) -> dict[str, Any]:
@@ -1074,7 +1173,10 @@ class MemoryStore:
             ]
             result["address"] = parsed.canonical
             return result
-        table = {"component": "component", "function": "function_symbol", "brick": "brick", "proof": "proof", "relation": "relation"}.get(parsed.resource_type)
+        table = {
+            "component": "component", "function": "function_symbol", "brick": "brick", "proof": "proof",
+            "relation": "relation", "asset": "asset", "pipeline": "pipeline_run",
+        }.get(parsed.resource_type)
         if table is None:
             raise NotFoundError(f"Ressource non lisible : {parsed.canonical}")
         row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (parsed.identifier,)).fetchone()
@@ -1084,6 +1186,10 @@ class MemoryStore:
         result["address"] = parsed.canonical
         if parsed.resource_type == "proof":
             result["environment"] = json.loads(result.pop("environment_json"))
+        elif parsed.resource_type == "asset":
+            result["provenance"] = json.loads(result.pop("provenance_json"))
+        elif parsed.resource_type == "pipeline":
+            result["parameters"] = json.loads(result.pop("parameters_json"))
         return result
 
     def read(self, address: str) -> dict[str, Any]:
@@ -1139,7 +1245,7 @@ class MemoryStore:
 
     def _entity_address(self, conn: sqlite3.Connection, entity_id: str) -> str:
         """Retourne l’adresse stable d’une entité liée, sans jamais inventer son type."""
-        for table, resource in (("knowledge", "knowledge"), ("component", "component"), ("function_symbol", "function"), ("brick", "brick"), ("proof", "proof"), ("relation", "relation")):
+        for table, resource in (("knowledge", "knowledge"), ("component", "component"), ("function_symbol", "function"), ("brick", "brick"), ("proof", "proof"), ("relation", "relation"), ("asset", "asset"), ("pipeline_run", "pipeline")):
             if conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (entity_id,)).fetchone():
                 return make_address(resource, entity_id)
         return entity_id
@@ -1172,6 +1278,150 @@ class MemoryStore:
                 raise NotFoundError(f"Objet introuvable : {entity_id}")
             rows = [dict(row) for row in conn.execute(f"SELECT * FROM relation WHERE {' AND '.join(filters)} ORDER BY created_at, id", args)]
         return {"entity_id": entity_id, "direction": direction, "include_inactive": include_inactive, "relations": rows}
+
+    def register_asset_file(
+        self, *, source_path: Path, kind: str, source_kind: str, provenance: dict[str, Any], actor: str
+    ) -> dict[str, Any]:
+        """Copie un asset autorisé sous le Store, le hashe et l’enregistre avec provenance."""
+        self._require_write()
+        if kind not in {"PE32", "DLL", "SNAPSHOT", "IAT_MAP", "CORPUS", "GENERATED", "TOOLCHAIN_REPORT"}:
+            raise AretError("Type d’asset invalide")
+        if source_kind not in {"LOCAL", "NETWORK", "GENERATED", "SNAPSHOT"}:
+            raise AretError("Origine d’asset invalide")
+        source = source_path.expanduser().resolve()
+        if not source.is_file():
+            raise NotFoundError(f"Asset source introuvable : {source}")
+        size_bytes = source.stat().st_size
+        if size_bytes > 2 * 1024 * 1024 * 1024:
+            raise AretError("Asset refusé : taille supérieure à 2 GiB")
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", source.name)[:128] or "asset.bin"
+        with self._transaction() as conn:
+            asset_id = self._new_id(conn, "asset", "AS")
+            relative_path = f"assets/{asset_id}_{safe_name}"
+            destination = self.artifacts_dir / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            copied_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
+            if not hmac.compare_digest(source_hash, copied_hash):
+                destination.unlink(missing_ok=True)
+                raise AretError("Copie d’asset incohérente : hash source/destination différent")
+            row = {
+                "id": asset_id, "kind": kind, "source_kind": source_kind, "relative_path": relative_path,
+                "sha256": copied_hash, "size_bytes": size_bytes, "provenance_json": canonical_json(provenance),
+                "created_at": utc_now(), "created_by": actor,
+            }
+            conn.execute(
+                """INSERT INTO asset(id,kind,source_kind,relative_path,sha256,size_bytes,provenance_json,created_at,created_by)
+                   VALUES(:id,:kind,:source_kind,:relative_path,:sha256,:size_bytes,:provenance_json,:created_at,:created_by)""",
+                row,
+            )
+            self._audit(conn, actor=actor, operation="REGISTER_ASSET", entity_type="asset", entity_id=asset_id, after=row)
+        return self.read(make_address("asset", asset_id))
+
+    def get_assets(self, kind: str | None = None, limit: int = 20) -> dict[str, Any]:
+        """Retourne les assets canoniques disponibles sans charger leurs octets."""
+        if limit < 1 or limit > HARD_MAX_ITEMS:
+            raise AretError(f"Limite assets invalide : 1 à {HARD_MAX_ITEMS}")
+        allowed = {"PE32", "DLL", "SNAPSHOT", "IAT_MAP", "CORPUS", "GENERATED", "TOOLCHAIN_REPORT"}
+        clauses = ""
+        args: list[Any] = []
+        if kind is not None:
+            normalized = str(kind).strip().upper()
+            if normalized not in allowed:
+                raise AretError("Type d’asset invalide")
+            clauses = "WHERE kind=?"
+            args.append(normalized)
+        with self._read_connection() as conn:
+            rows = [dict(row) for row in conn.execute(
+                f"SELECT * FROM asset {clauses} ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit)
+            ).fetchall()]
+        for row in rows:
+            row["provenance"] = json.loads(row.pop("provenance_json"))
+            row["address"] = make_address("asset", row["id"])
+        return {"kind": kind, "assets": rows}
+
+    def record_pipeline_run(
+        self, *, pipeline_name: str, kind: str, policy: str, result: str, command: str, parameters: dict[str, Any],
+        artifact_path: str, artifact_hash: str, exit_code: int | None, started_at: str, finished_at: str, actor: str,
+    ) -> dict[str, Any]:
+        """Journalise une exécution de pipeline fermé, avec l’artefact déjà hashé sous le Store."""
+        self._require_write()
+        normalized_name = str(pipeline_name).strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,95}", normalized_name):
+            raise AretError("Nom de pipeline invalide")
+        if policy not in {"READ_ONLY", "GENERATE", "NETWORK", "SENSITIVE"}:
+            raise AretError("Politique de pipeline invalide")
+        if result not in {"PASS", "FAIL", "ERROR", "SKIPPED", "UNKNOWN", "PLANNED"}:
+            raise AretError("Résultat de pipeline invalide")
+        serialized_parameters = canonical_json(parameters)
+        if len(serialized_parameters.encode("utf-8")) > 16384:
+            raise AretError("Paramètres de pipeline trop volumineux")
+        relative_path, _ = self._validate_artifact(artifact_path, artifact_hash)
+        if not relative_path:
+            raise AretError("Une exécution de pipeline exige un artefact")
+        verified_hash = hashlib.sha256((self.artifacts_dir / relative_path).read_bytes()).hexdigest()
+        with self._transaction() as conn:
+            run_id = self._new_id(conn, "pipeline_run", "PR")
+            row = {
+                "id": run_id, "pipeline_name": normalized_name, "kind": str(kind).strip().upper(), "policy": policy,
+                "result": result, "command": command, "parameters_json": serialized_parameters,
+                "artifact_path": relative_path, "artifact_hash": verified_hash, "exit_code": exit_code,
+                "started_at": started_at, "finished_at": finished_at, "created_at": utc_now(), "created_by": actor,
+            }
+            conn.execute(
+                """INSERT INTO pipeline_run(id,pipeline_name,kind,policy,result,command,parameters_json,artifact_path,artifact_hash,
+                   exit_code,started_at,finished_at,created_at,created_by)
+                   VALUES(:id,:pipeline_name,:kind,:policy,:result,:command,:parameters_json,:artifact_path,:artifact_hash,
+                   :exit_code,:started_at,:finished_at,:created_at,:created_by)""",
+                row,
+            )
+            self._audit(conn, actor=actor, operation="RUN_PIPELINE", entity_type="pipeline", entity_id=run_id, after=row)
+        return self.read(make_address("pipeline", run_id))
+
+    def get_pipeline_runs(self, pipeline_name: str | None = None, limit: int = 12) -> dict[str, Any]:
+        """Retourne les derniers pipelines exécutés, sans charger leurs artefacts lourds."""
+        if limit < 1 or limit > HARD_MAX_ITEMS:
+            raise AretError(f"Limite pipeline invalide : 1 à {HARD_MAX_ITEMS}")
+        clauses: list[str] = []
+        args: list[Any] = []
+        if pipeline_name is not None:
+            name = str(pipeline_name).strip().lower()
+            if not re.fullmatch(r"[a-z][a-z0-9_]{1,95}", name):
+                raise AretError("Nom de pipeline invalide")
+            clauses.append("pipeline_name=?")
+            args.append(name)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._read_connection() as conn:
+            rows = [dict(row) for row in conn.execute(
+                f"SELECT * FROM pipeline_run {where} ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit)
+            ).fetchall()]
+        for row in rows:
+            row["parameters"] = json.loads(row.pop("parameters_json"))
+            row["address"] = make_address("pipeline", row["id"])
+        return {"pipeline_name": pipeline_name, "runs": rows}
+
+    def read_pipeline_artifact(self, pipeline_run_id: str, max_bytes: int = DEFAULT_MAX_BYTES) -> dict[str, Any]:
+        """Lit l’artefact hashé d’un pipeline après vérification d’intégrité et borne de taille."""
+        if max_bytes < 1 or max_bytes > HARD_MAX_BYTES:
+            raise AretError(f"max_bytes doit être compris entre 1 et {HARD_MAX_BYTES}")
+        with self._read_connection() as conn:
+            row = conn.execute("SELECT artifact_path, artifact_hash FROM pipeline_run WHERE id=?", (pipeline_run_id,)).fetchone()
+            if row is None:
+                raise NotFoundError(f"Pipeline introuvable : {pipeline_run_id}")
+            path = (self.artifacts_dir / row["artifact_path"]).resolve()
+            if self.artifacts_dir not in path.parents or not path.is_file():
+                raise AretError("Référence d’artefact pipeline hors périmètre ou absente")
+            data = path.read_bytes()
+            actual_hash = hashlib.sha256(data).hexdigest()
+            if not hmac.compare_digest(actual_hash, row["artifact_hash"]):
+                raise AretError("Intégrité d’artefact pipeline échouée")
+        returned = data[:max_bytes]
+        return {
+            "pipeline_address": make_address("pipeline", pipeline_run_id), "artifact_path": row["artifact_path"],
+            "artifact_hash": actual_hash, "artifact_size": len(data), "returned_bytes": len(returned),
+            "truncated": len(returned) < len(data), "content": returned.decode("utf-8", errors="replace"),
+        }
 
     def read_artifact(self, proof_id: str, max_bytes: int = DEFAULT_MAX_BYTES) -> dict[str, Any]:
         if max_bytes < 1 or max_bytes > HARD_MAX_BYTES:

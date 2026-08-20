@@ -12,6 +12,8 @@ SCHEMES = {
     "brick": "brick",
     "proof": "proof",
     "relation": "relation",
+    "asset": "asset",
+    "pipeline": "pipeline",
 }
 
 

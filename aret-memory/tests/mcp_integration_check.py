@@ -27,13 +27,15 @@ async def main() -> None:
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
             required = {
-                "aret_boot", "aret_restore", "aret_get_front", "aret_find", "aret_read", "aret_read_batch",
+                "aret_boot", "aret_restore", "aret_get_front", "aret_get_resume_brief", "aret_get_resume_protocol", "aret_find", "aret_read", "aret_read_batch",
                 "aret_get_forensics", "aret_get_proofs", "aret_get_related", "aret_get_roadmap", "aret_read_artifact",
                 "aret_append_knowledge", "aret_update_front", "aret_replace_front", "aret_rebuild_front",
                 "aret_record_proof", "aret_attach_proof", "aret_invalidate_proof", "aret_add_relation",
                 "aret_supersede_relation", "aret_register_component", "aret_register_function", "aret_register_brick", "aret_update_brick",
                 "aret_rebuild_index", "aret_export", "aret_export_bundle", "aret_import_bundle", "aret_export_roadmap",
-                "aret_run_oracle", "aret_sync_memory", "aret_export_reference_91",
+                "aret_run_oracle", "aret_get_pipeline_catalog", "aret_get_toolchain_status", "aret_run_pipeline",
+                "aret_get_pipeline_runs", "aret_read_pipeline_artifact", "aret_get_assets", "aret_register_asset",
+                "aret_sync_memory", "aret_export_reference_91",
             }
             missing = required - names
             unexpected = names - required

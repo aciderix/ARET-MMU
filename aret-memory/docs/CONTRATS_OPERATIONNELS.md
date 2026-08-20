@@ -8,11 +8,11 @@ Les opérations de session, de synchronisation et de transport mémoire sont **d
 
 | Domaine | Règle actuelle |
 |---|---|
-| Hooks | Lecture seule par défaut. Les checkpoints `PreCompact`/`PostCompact` exigent `ARET_HOOK_WRITE_ENABLED=true`. |
+| Hooks | Lecture seule par défaut. `SessionStart` et `PostCompact` arment une barrière de reprise ; les checkpoints exigent `ARET_HOOK_WRITE_ENABLED=true`. |
 | Front | `update_front` modifie un sous-ensemble ; `replace_front` remplace le contexte chaud et conserve l’état précédent dans l’audit. |
 | Git | Les commits sont limités à `.aret-memory/`. Toute modification hors périmètre refuse le commit mémoire. |
 | WAL | Checkpoint `TRUNCATE` avant commit Git et export de bundle ; un SQLite occupé bloque l’opération concernée. |
-| Fichiers temporaires | `.aret-memory/*.sqlite-wal` et `.sqlite-shm` sont ignorés par Git ; la base `.sqlite` reste versionnable. |
+| Fichiers temporaires | `.aret-memory/*.sqlite-wal`, `.sqlite-shm` et `runtime/` sont ignorés par Git ; la base `.sqlite` reste versionnable. |
 | Relations | Les traversées retournent `ACTIVE` par défaut ; `include_inactive=true` expose les liens `SUPERSEDED` et leur `superseded_by`. |
 | Briques | Le bootstrap initialise les jalons `M7-GUI`, `AUTO-LIFT-02`, `FIBERS-01` à `FIBERS-05` et `PHASE-A` à `PHASE-C`. |
 | Bundle | Version 3, manifest/snapshot/migrations/artefacts hashés et contrôlés. |
@@ -24,11 +24,14 @@ Les opérations de session, de synchronisation et de transport mémoire sont **d
 
 | Événement | Lanceur installé | Comportement |
 |---|---|---|
-| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Fixe le Memory Store, appelle `restore()` et émet `hookSpecificOutput.additionalContext`. |
+| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Arme la barrière, injecte doctrine, Front, règles, journal 71, audit, Git et pipelines. |
 | `PreCompact` | `.claude/hooks/aret-mmu-pre-compact.sh` | Retourne Front, audit récent borné et adresses de reprise ; checkpoint seulement sur activation. |
-| `PostCompact` | `.claude/hooks/aret-mmu-post-compact.sh` | Retourne doctrine, Front et adresses pertinentes ; trace optionnelle du résultat de compaction. |
+| `PostCompact` | `.claude/hooks/aret-mmu-post-compact.sh` | Arme à nouveau la barrière, injecte doctrine, Front et contexte Git ; trace optionnelle de compaction. |
+| `PreToolUse` | `.claude/hooks/aret-mmu-resume-pre-tool.sh` | Refuse tout outil hors `aret_get_resume_protocol`, `aret_read` et `aret_read_batch` tant que la reprise est incomplète. |
+| `PostToolUse` | `.claude/hooks/aret-mmu-resume-post-tool.sh` | Enregistre les adresses lues avec succès et lève la barrière seulement lorsque tous les lots sont lus. |
+| `Stop` | `.claude/hooks/aret-mmu-resume-stop.sh` | Fournit une relance unique lorsque l’agent tente de conclure avec une barrière active. |
 
-`SessionStart` injecte seulement la doctrine, les valeurs utiles du Front et au plus douze adresses pertinentes, avec une taille finale plafonnée à 9 500 caractères. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
+`SessionStart` injecte la doctrine, les valeurs utiles du Front, les règles, les dernières entrées du journal 71, l’audit, la branche Git, les commits récents et le catalogue de pipelines. Après `SessionStart` ou `PostCompact`, l’agent appelle `aret_get_resume_protocol`, puis lit par `aret_read_batch` toutes les pages canoniques des documents 70, 80, 81, 82 et 90 ainsi que les huit dernières entrées 71. L’état du garde est éphémère sous `.aret-memory/runtime/resume_guard/`, donc n’est ni une connaissance SQLite ni une donnée Git. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
 
 ## Git mémoire local
 

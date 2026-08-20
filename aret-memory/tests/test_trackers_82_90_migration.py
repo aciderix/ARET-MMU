@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import external_aret_repository
 from core.repository import MemoryStore
 from migration.import_trackers_82_90 import DOCUMENTS, parse_all, run
 from migration.verify_trackers_82_90 import verify
 
 
 def test_trackers_82_90_import_is_exact_and_idempotent(tmp_path: Path) -> None:
-    aret_repo = external_aret_repository()
+    aret_repo = Path(__file__).resolve().parents[2]
     sections = parse_all(aret_repo)
     assert len(sections) == 50
     assert sum(item.path == DOCUMENTS[0] for item in sections) == 33

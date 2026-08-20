@@ -57,6 +57,18 @@ def test_oracle_fail_is_recorded_without_promotion(tmp_path: Path, monkeypatch: 
     assert store.read(f"ARET://knowledge/{knowledge_id}")["status"] == "OBSERVED"
 
 
+def test_winediff_failure_is_not_masked_by_partial_skips() -> None:
+    verdict = oracles.normalise_result(
+        oracles.ORACLES["winediff"],
+        1,
+        "SKIP  optional_fixture (missing optional DLL)\nOS-API (Wine) equivalence: 0/264 programs\n",
+        "",
+        [],
+        False,
+    )
+    assert verdict == "FAIL"
+
+
 def test_missing_oracle_dependency_is_explicit_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repository = oracle_repository(tmp_path, "echo should-not-run; exit 1")
     monkeypatch.setitem(oracles.ORACLES, "difftest", OracleSpec("difftest", "DIFFTEST", "bench/difftest.sh", ("definitely-missing-aret-tool",), 20))

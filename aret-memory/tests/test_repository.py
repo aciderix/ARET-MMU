@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from pathlib import Path
 
 import pytest
 
+import core.repository as repository
 from core.repository import AretError, MemoryStore, NotFoundError, WriteDisabledError
 from evidence.capture import create_receipt
 
@@ -46,6 +48,24 @@ def record_admissible_proof(store: MemoryStore) -> str:
     )
     assert proof["admissible"] == 1
     return proof["id"]
+
+
+def test_reopening_existing_store_in_read_mode_preserves_metadata(tmp_path: Path, monkeypatch) -> None:
+    memory_dir = tmp_path / ".aret-memory"
+    MemoryStore(memory_dir, write_enabled=True)
+    with sqlite3.connect(memory_dir / "aret_memory.sqlite") as connection:
+        before = connection.execute(
+            "SELECT key, value, updated_at FROM store_metadata ORDER BY key"
+        ).fetchall()
+
+    monkeypatch.setattr(repository, "utc_now", lambda: "2099-01-01T00:00:00Z")
+    MemoryStore(memory_dir, write_enabled=False)
+    with sqlite3.connect(memory_dir / "aret_memory.sqlite") as connection:
+        after = connection.execute(
+            "SELECT key, value, updated_at FROM store_metadata ORDER BY key"
+        ).fetchall()
+
+    assert after == before
 
 
 def test_boot_and_readonly_guard(tmp_path: Path) -> None:

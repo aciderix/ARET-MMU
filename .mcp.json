@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "aret-memory": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PROJECT_DIR:-.}/aret-memory/aret_mmu_server.py",
+        "--memory-dir",
+        "${CLAUDE_PROJECT_DIR:-.}/aret-memory/.aret-memory",
+        "--write-enabled"
+      ]
+    }
+  }
+}

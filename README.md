@@ -13,10 +13,11 @@
 | Evidence Store | Preuves signées HMAC, artefacts hashés, invalidation et promotion contrôlée. |
 | Graphe | Relations typées, cycle de vie `ACTIVE` / `SUPERSEDED`, traversée historique opt-in. |
 | Roadmap V1.1 | Briques classées par jalon, plateforme et priorité ; vue et export de roadmap dérivés. |
-| Reprise Claude Code | Hooks `SessionStart`, `PreCompact` et `PostCompact` avec Front minimal et audité. |
+| Reprise Claude Code | Contexte complet à `SessionStart` / `PostCompact`, puis barrière obligatoire de lecture contrôlée par `PreToolUse`, `PostToolUse` et `Stop`. |
+| Pipelines et corpus | 27 pipelines nommés et fermés, politiques explicites, plan `dry_run` et artefacts hashés. |
 | Portabilité | Bundle v3 vérifié et synchronisation Git bornée exclusivement au Memory Store. |
 
-Le serveur expose **32 outils MCP**. Son contrat détaillé est disponible dans [`aret-memory/docs/CONTRAT_MCP_V1.md`](aret-memory/docs/CONTRAT_MCP_V1.md).
+Le serveur expose **41 outils MCP**. Son contrat détaillé est disponible dans [`aret-memory/docs/CONTRAT_MCP_V1.md`](aret-memory/docs/CONTRAT_MCP_V1.md).
 
 ## Installation locale
 
@@ -39,7 +40,7 @@ Ne publiez jamais une vraie clé HMAC, un jeton GitHub, un fichier `.env` ou un 
 
 ## Configuration Claude Code
 
-Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. Le hook de démarrage restaure le **Front** minimal, puis Claude utilise `aret_find` et `aret_read` pour accéder explicitement au contenu pertinent.
+Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. À chaque `SessionStart` ou `PostCompact`, le contexte injecte doctrine, Front, règles, dernières entrées du journal 71, audit, état Git et catalogue de pipelines. Claude doit ensuite appeler `aret_get_resume_protocol` et lire tous les lots via `aret_read_batch`. Tant que ces pages canoniques ne sont pas lues, les opérations hors lecture sont refusées et une tentative de fin reçoit une relance unique.
 
 La configuration du serveur MCP doit faire pointer Claude Code vers :
 
@@ -68,9 +69,9 @@ python3 tests/mcp_integration_check.py
 python3 -m compileall -q aret_mmu_server.py core evidence hooks migration ops cli
 ```
 
-La livraison validée contient **38 tests** et le contrôle stdio vérifie les **32 outils** attendus. Dans un clone MCP isolé, les **31 tests internes** passent directement et les 7 tests d’intégration dépendant de documents, corpus et scripts du dépôt ARET principal sont signalés `skipped` de manière explicite.
+La livraison validée contient **49 tests** et le contrôle stdio vérifie les **41 outils** attendus. La suite est exécutable dans le clone MCP isolé ; les tests qui requièrent explicitement un dépôt ARET source restent signalés `skipped` lorsque ce chemin n’est pas configuré.
 
-Pour exécuter les 38 tests sans intégrer ARET au dépôt MCP, clonez ARET séparément et indiquez son chemin :
+Pour exécuter les tests qui nécessitent explicitement un dépôt ARET source, clonez ARET séparément et indiquez son chemin :
 
 ```bash
 ARET_SOURCE_REPOSITORY=/chemin/vers/Automatic-reverse-engineering-toolkit \
@@ -88,4 +89,5 @@ Les importeurs de documents acceptent également `--repository-root /chemin/vers
 | [`aret-memory/docs/MATRICE_CONFORMITE_V5_FINALE_2026-08-19.md`](aret-memory/docs/MATRICE_CONFORMITE_V5_FINALE_2026-08-19.md) | Matrice de conformité architecturale V5. |
 | [`aret-memory/docs/MEMOIRE_STRATEGIQUE_CAPACITES_ET_ROADMAP.md`](aret-memory/docs/MEMOIRE_STRATEGIQUE_CAPACITES_ET_ROADMAP.md) | Gestion des capacités, décisions et objectifs à long terme. |
 | [`aret-memory/docs/STATUT_DOCUMENT_91.md`](aret-memory/docs/STATUT_DOCUMENT_91.md) | Décision de non-import de la synthèse 91, redondante des sources déjà migrées. |
-| [`aret-memory/docs/CONTRATS_OPERATIONNELS.md`](aret-memory/docs/CONTRATS_OPERATIONNELS.md) | Hooks, bundles et synchronisation Git bornée. |
+| [`aret-memory/docs/CONTRATS_OPERATIONNELS.md`](aret-memory/docs/CONTRATS_OPERATIONNELS.md) | Hooks, barrière de reprise, bundles et synchronisation Git bornée. |
+| [`aret-memory/docs/PIPELINES_ARET_V1.md`](aret-memory/docs/PIPELINES_ARET_V1.md) | Catalogue fermé des pipelines, politiques d’exécution et artefacts. |

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import external_aret_repository
 from core.repository import MemoryStore
 from migration.import_pilot import git_revision
 from migration.import_references_70_80_81 import DOCUMENTS, parse_for_store, run
@@ -10,7 +9,7 @@ from migration.verify_references_70_80_81 import verify
 
 
 def test_references_70_80_81_are_covered_and_idempotent(tmp_path: Path) -> None:
-    aret_repo = external_aret_repository()
+    aret_repo = Path(__file__).resolve().parents[2]
     memory_dir = tmp_path / ".aret-memory"
     writable_store = MemoryStore(memory_dir, write_enabled=True)
     sections = parse_for_store(aret_repo, writable_store, git_revision(aret_repo))

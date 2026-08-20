@@ -27,14 +27,15 @@ Le projet livre un serveur MCP réellement exécutable, des migrations SQLite ve
 | Append-first, versionnement et relations | Disponible, avec écriture activée |
 | Preuves, intégrité des artefacts et invariant `PROVEN` | Disponible, avec écriture activée |
 | Oracles `difftest`, `winediff`, `funcdiff` | Adaptateurs déterministes : capture d’artefact, HMAC, preuve, liaison et promotion contrôlée |
+| Pipelines, corpus et assets | 27 pipelines fermés, politiques `READ_ONLY` / `GENERATE` / `NETWORK` / `SENSITIVE`, `dry_run` par défaut et artefacts hashés |
 | Audit et reconstruction FTS5 | Disponible |
 | Exports JSON, Markdown et bundle de lecture | Disponible |
 | Références 70, 80 et 81 | Disponible : 86 objets sourcés, couverture des lignes substantielles et contrôle d’intégrité. |
 | Journal 71 | Disponible : 378 entrées datées, contenu exact, provenance et contrôle d’exhaustivité. |
 | Trackers 82 et 90 | Disponible : 50 sections non chevauchantes avec provenance et contrôle d’intégrité. |
 | Corpus documentaire central | Disponible : 514 objets sourcés, index FTS5 reconstruit et vérifié. |
-| Hooks de cycle de vie Claude Code | Hors serveur MCP ; à intégrer au plugin/runtime visé |
-| Synchronisation Git automatique et résolution de conflits | Hors V1 ; aucune commande Git implicite n’est exécutée |
+| Hooks de cycle de vie Claude Code | Disponible : contexte injecté à `SessionStart` / `PostCompact` et barrière de reprise obligatoire |
+| Synchronisation Git automatique et résolution de conflits | Opt-in, bornée au Memory Store ; `auto_push=false` par défaut |
 
 ## Prérequis et installation
 
@@ -78,13 +79,14 @@ Le fichier de configuration suivant est un modèle. Remplacez les chemins par ce
 }
 ```
 
-Après connexion, appelez `aret_boot`, puis `aret_get_front`. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
+Après connexion, appelez `aret_boot`, puis `aret_get_front`. Lorsqu’une session vient de démarrer ou d’être compactée, commencez par `aret_get_resume_protocol`, puis lisez tous ses lots avec `aret_read_batch` : les hooks refusent toute autre opération tant que ces pages canoniques ne sont pas confirmées. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
 
 | Outil | Usage |
 |---|---|
 | `aret_boot` | Lit doctrine, version du format, mode écriture et bornes. |
 | `aret_get_front` | Récupère la mémoire chaude minimale. |
 | `aret_restore` | Restitue le noyau de reprise : doctrine, versions et Active Front, sans historique massif. |
+| `aret_get_resume_brief` / `aret_get_resume_protocol` | Restituent les pointeurs de reprise, puis les lots obligatoires issus des documents 70/80/81/82/90 et du journal 71. |
 | `aret_find` | Découvre des candidats par composant, tag, type, statut, dates ou FTS5. |
 | `aret_read` / `aret_read_batch` | Restitue le contenu canonique, le hash et les métadonnées d’une ou plusieurs adresses connues. |
 | `aret_get_forensics` | Découvre les forensics liés à un composant ou une fonction. |
@@ -95,6 +97,8 @@ Après connexion, appelez `aret_boot`, puis `aret_get_front`. Utilisez ensuite `
 | `aret_get_related` | Traverse uniquement les relations explicitement stockées. |
 | `aret_rebuild_front` | Reconstitue les pointeurs dérivés du Front sans supprimer les clés manuelles. |
 | `aret_export` | Produit une vue JSON, Markdown, HTML ou un bundle vérifié. |
+| `aret_get_pipeline_catalog` / `aret_run_pipeline` | Exposent uniquement des pipelines nommés et fermés, avec plan `dry_run`, confirmations explicites et artefacts hashés. |
+| `aret_get_assets` / `aret_register_asset` | Inventorient et importent les corpus et artefacts admis, sans chemin arbitraire. |
 
 ## Activation contrôlée des écritures
 
@@ -182,7 +186,7 @@ Les conventions et le contrat détaillé sont dans [`docs/MEMOIRE_STRATEGIQUE_CA
 
 ## Intégration opérationnelle
 
-Les scripts `hooks/session_start.py`, `hooks/pre_compact.py` et `hooks/post_compact.py` fournissent un contexte de reprise déterministe en lecture seule, et sont installés dans `.claude/settings.json`. Les opérations Git sont limitées au Memory Store ; une synchronisation automatique post-transaction reste opt-in (`auto_commit=false`, `auto_push=false` par défaut), bornée à `.aret-memory/` depuis la racine Git et précédée d’un checkpoint WAL. Les Memory Bundles v3 permettent un transport vérifié sans fusion implicite.
+Les scripts `hooks/session_start.py`, `hooks/pre_compact.py` et `hooks/post_compact.py` injectent doctrine, Front, règles, journal 71, audit, contexte Git et catalogue de pipelines. Les hooks `PreToolUse`, `PostToolUse` et `Stop` appliquent ensuite une barrière de reprise : Claude doit lire, via le protocole MCP, toutes les pages canonisées des documents 70, 80, 81, 82 et 90 ainsi que les huit dernières entrées 71 avant toute action hors lecture. Les opérations Git sont limitées au Memory Store ; une synchronisation automatique post-transaction reste opt-in (`auto_commit=false`, `auto_push=false` par défaut), bornée à `.aret-memory/` depuis la racine Git et précédée d’un checkpoint WAL. Les Memory Bundles v3 permettent un transport vérifié sans fusion implicite.
 
 Le guide complet et les commandes reproductibles sont disponibles dans [`docs/INTEGRATION_OPERATIONNELLE.md`](docs/INTEGRATION_OPERATIONNELLE.md) et [`docs/CONTRATS_OPERATIONNELS.md`](docs/CONTRATS_OPERATIONNELS.md).
 

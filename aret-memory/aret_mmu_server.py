@@ -12,9 +12,10 @@ from pathlib import Path
 
 from core.repository import AretError, MemoryStore
 from evidence.adapters.oracles import run_oracle
+from evidence.adapters.pipelines import pipeline_catalog, register_asset, run_pipeline, toolchain_status
 from ops.git_memory import GitMemoryError, automatic_sync
 
-SERVER_INSTRUCTIONS = """ARET-MMU fournit une mémoire durable déterministe. Utilisez FIND uniquement pour découvrir des candidats, puis READ ou READ_BATCH sur les adresses explicitement sélectionnées pour récupérer le contenu canonique. Ne déduisez jamais une preuve d’un score de recherche. PROVEN exige une preuve PASS admissible. Les mutations peuvent être désactivées ; aucune écriture destructive n’est disponible."""
+SERVER_INSTRUCTIONS = """ARET-MMU fournit une mémoire durable déterministe et une façade de pipelines ARET à liste fermée. Utilisez FIND uniquement pour découvrir des candidats, puis READ ou READ_BATCH sur les adresses explicitement sélectionnées pour récupérer le contenu canonique. Ne déduisez jamais une preuve d’un score de recherche. PROVEN exige une preuve PASS admissible. Consultez d’abord aret_get_pipeline_catalog et utilisez aret_run_pipeline en dry_run ; les pipelines génératifs, réseau et sensibles exigent leurs confirmations explicites. Aucun shell, URL ou push Git arbitraire n’est exposé."""
 
 store = MemoryStore()
 mcp = MCPServer(
@@ -52,6 +53,18 @@ def aret_get_front() -> dict[str, Any]:
 def aret_restore() -> dict[str, Any]:
     """Retourne le contexte chaud restaurable : doctrine, versions et Active Front, sans historique massif."""
     return _call("restore")
+
+
+@mcp.tool()
+def aret_get_resume_brief(journal_limit: int = 8, rule_limit: int = 20, audit_limit: int = 12) -> dict[str, Any]:
+    """Retourne le paquet de reprise : Front, règles, dernières entrées 71 et audit ; Git reste séparé en lecture seule."""
+    return _call("get_resume_brief", journal_limit=journal_limit, rule_limit=rule_limit, audit_limit=audit_limit)
+
+
+@mcp.tool()
+def aret_get_resume_protocol(journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:
+    """Retourne la liste et les lots de lectures obligatoires des documents 70/80/81/82/90 et des dernières entrées 71."""
+    return _call("get_resume_protocol", journal_limit=journal_limit, batch_size=batch_size)
 
 
 @mcp.tool()
@@ -284,6 +297,83 @@ def aret_run_oracle(
         return {"ok": False, "operation": "run_oracle", "error": {"code": type(exc).__name__, "message": str(exc)}}
     except Exception as exc:
         return {"ok": False, "operation": "run_oracle", "error": {"code": "INTERNAL_ERROR", "message": str(exc)}}
+
+
+@mcp.tool()
+def aret_get_pipeline_catalog() -> dict[str, Any]:
+    """Retourne les pipelines ARET nommés, leurs politiques, prérequis et contrats sans lancer de processus."""
+    return {"ok": True, "operation": "get_pipeline_catalog", "result": pipeline_catalog()}
+
+
+@mcp.tool()
+def aret_get_toolchain_status(repository_path: str | None = None) -> dict[str, Any]:
+    """Diagnostique les prérequis Wine, MinGW, Rust, Unicorn, Clang, Z3 et le binaire ARET sans mutation."""
+    try:
+        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
+        repository = Path(repository_path).expanduser().resolve() if repository_path else default_repository
+        if repository != default_repository.resolve():
+            raise AretError("repository_path doit désigner le dépôt ARET configuré")
+        return {"ok": True, "operation": "get_toolchain_status", "result": toolchain_status(repository)}
+    except AretError as exc:
+        return {"ok": False, "operation": "get_toolchain_status", "error": {"code": type(exc).__name__, "message": str(exc)}}
+    except Exception as exc:
+        return {"ok": False, "operation": "get_toolchain_status", "error": {"code": "INTERNAL_ERROR", "message": str(exc)}}
+
+
+@mcp.tool()
+def aret_run_pipeline(
+    pipeline: str, parameters: dict[str, Any] | None = None, dry_run: bool = True,
+    confirm_apply: bool = False, confirm_network: bool = False, confirm_sensitive: bool = False,
+    timeout_seconds: int | None = None, repository_path: str | None = None, actor: str = "mcp-pipeline-adapter",
+) -> dict[str, Any]:
+    """Exécute un pipeline ARET de liste fermée ; dry_run est la valeur sûre par défaut et aucune commande libre n’est admise."""
+    try:
+        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
+        repository = Path(repository_path).expanduser().resolve() if repository_path else default_repository
+        if repository != default_repository.resolve():
+            raise AretError("repository_path doit désigner le dépôt ARET configuré")
+        result = run_pipeline(
+            store, repository, pipeline, parameters, dry_run=dry_run, confirm_apply=confirm_apply,
+            confirm_network=confirm_network, confirm_sensitive=confirm_sensitive,
+            timeout_seconds=timeout_seconds, actor=actor,
+        )
+        return {"ok": True, "operation": "run_pipeline", "result": result}
+    except AretError as exc:
+        return {"ok": False, "operation": "run_pipeline", "error": {"code": type(exc).__name__, "message": str(exc)}}
+    except Exception as exc:
+        return {"ok": False, "operation": "run_pipeline", "error": {"code": "INTERNAL_ERROR", "message": str(exc)}}
+
+
+@mcp.tool()
+def aret_get_pipeline_runs(pipeline: str | None = None, limit: int = 12) -> dict[str, Any]:
+    """Retourne les derniers résultats de pipelines et leurs adresses, sans charger les artefacts lourds."""
+    return _call("get_pipeline_runs", pipeline_name=pipeline, limit=limit)
+
+
+@mcp.tool()
+def aret_read_pipeline_artifact(pipeline_run_id: str, max_bytes: int = 65536) -> dict[str, Any]:
+    """Lit l’artefact hashé d’une exécution de pipeline explicitement adressée."""
+    return _call("read_pipeline_artifact", pipeline_run_id=pipeline_run_id, max_bytes=max_bytes)
+
+
+@mcp.tool()
+def aret_get_assets(kind: str | None = None, limit: int = 20) -> dict[str, Any]:
+    """Retourne les corpus, binaires et snapshots enregistrés avec leurs hashes et provenances, sans charger leurs octets."""
+    return _call("get_assets", kind=kind, limit=limit)
+
+
+@mcp.tool()
+def aret_register_asset(source_path: str, kind: str, confirm_import: bool = False, actor: str = "mcp-asset-import") -> dict[str, Any]:
+    """Copie et enregistre un asset local ARET autorisé après confirmation explicite, hash et provenance contrôlée."""
+    try:
+        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
+        return {"ok": True, "operation": "register_asset", "result": register_asset(
+            store, default_repository, source_path, kind, confirm_import=confirm_import, actor=actor,
+        )}
+    except AretError as exc:
+        return {"ok": False, "operation": "register_asset", "error": {"code": type(exc).__name__, "message": str(exc)}}
+    except Exception as exc:
+        return {"ok": False, "operation": "register_asset", "error": {"code": "INTERNAL_ERROR", "message": str(exc)}}
 
 
 @mcp.tool()

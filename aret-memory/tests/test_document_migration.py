@@ -3,13 +3,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from conftest import external_aret_repository
 from core.repository import MemoryStore
 from migration.import_pilot import PILOT_SLICES, run
 
 
 def test_pilot_migration_is_sourced_and_idempotent(tmp_path: Path) -> None:
-    aret_repo = external_aret_repository()
+    aret_repo = Path(__file__).resolve().parents[2]
     memory_dir = tmp_path / ".aret-memory"
     first = run(aret_repo, memory_dir)
     assert len(first["imported"]) == len(PILOT_SLICES)
