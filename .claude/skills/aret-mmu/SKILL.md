@@ -9,14 +9,13 @@ Utiliser ce skill dès qu’une tâche porte sur l’état connu d’ARET, une d
 
 ## Démarrage et reprise
 
-1. Après `SessionStart` ou `PostCompact`, considérer la barrière de reprise comme active. Exploiter d’abord le paquet intégral déjà injecté depuis SQLite : doctrine, règles, Front, roadmap, Git, audit, assets, capacités MCP et pipelines.
-2. Considérer les documents 70, 80, 81, 82 et 90 comme **injectés intégralement**, page par page, depuis les objets canonisés SQLite ; les huit dernières entrées 71 sont elles aussi injectées intégralement. Ne pas relire leurs fichiers Markdown après une compaction.
-3. Utiliser `aret_find` puis `aret_read` ou `aret_read_batch` uniquement pour approfondir une connaissance historique hors des huit dernières entrées 71, ou une adresse précise justifiée par la tâche.
-4. Avant toute analyse, édition, commande, test, génération ou conclusion, produire un récapitulatif rituel couvrant : règles de travail ; état, Front et objectifs ; capacités MCP, analyse et industrialisation ; Git ; limites, preuves et garde-fous ; prochaine action.
-5. Confirmer ce récapitulatif avec `aret_acknowledge_resume`. Tant que cette confirmation n’a pas réussi, `PreToolUse` refuse toute autre opération et `Stop` relance une fois la reprise.
-6. Une fois le rituel confirmé, appeler `aret_boot`, `aret_get_resume_brief` ou `aret_restore` seulement lorsqu’un complément ciblé est nécessaire. Examiner le contexte Git injecté avant toute synchronisation.
-7. Appeler `aret_get_front` avant de modifier une orientation active ou une brique référencée par le Front.
-8. Considérer la mémoire SQLite comme la source canonique ; le texte de conversation n’est jamais une preuve de l’état du projet.
+1. Après `SessionStart` ou `PostCompact`, considérer la barrière de reprise comme active. Exploiter d’abord le paquet déjà injecté depuis SQLite : doctrine, règles, Front, roadmap, journal 71, audit, Git, assets, capacités MCP et pipelines.
+2. Ne pas relire par défaut les documents Markdown 70, 71, 80, 81, 82 ou 90 : leur contenu canonique est déjà ingéré dans SQLite et les extraits utiles sont injectés. Utiliser `aret_read` ou `aret_read_batch` seulement pour approfondir un objet précis justifié par la tâche.
+3. Avant toute analyse, édition, commande, test, génération ou conclusion, produire un récapitulatif rituel couvrant : règles de travail ; état, Front et objectifs ; capacités MCP, analyse et industrialisation ; Git ; limites, preuves et garde-fous ; prochaine action.
+4. Confirmer ce récapitulatif avec `aret_acknowledge_resume`. Tant que cette confirmation n’a pas réussi, `PreToolUse` refuse toute autre opération et `Stop` relance une fois la reprise.
+5. Une fois le rituel confirmé, appeler `aret_boot`, `aret_get_resume_brief` ou `aret_restore` seulement lorsqu’un complément ciblé est nécessaire. Examiner le contexte Git injecté avant toute synchronisation.
+6. Appeler `aret_get_front` avant de modifier une orientation active ou une brique référencée par le Front.
+7. Considérer la mémoire SQLite comme la source canonique ; le texte de conversation n’est jamais une preuve de l’état du projet.
 
 ## Lecture et découverte
 

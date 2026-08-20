@@ -13,25 +13,6 @@ from ops.git_memory import GitMemoryError, commit, status
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_RESUME_DOCUMENTS = (
-    "docs/vision/70-reference-etat-methode-reste.md",
-    "docs/vision/80-orientations-architecturales.md",
-    "docs/vision/81-industrialisation.md",
-    "docs/vision/82-suivi-industrialisation.md",
-    "docs/vision/90-corpus-sources.md",
-)
-
-
-def _source(path: str, line: int) -> dict[str, object]:
-    return {
-        "repository": "aciderix/ARET",
-        "revision": "a" * 40,
-        "path": path,
-        "start_line": line,
-        "end_line": line + 1,
-        "section": f"§{line}",
-        "hash": "b" * 64,
-    }
 
 
 def run_hook(name: str, memory_dir: Path, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -50,13 +31,6 @@ def populated_store(memory_dir: Path) -> MemoryStore:
         knowledge_type="OBSERVATION", status="OBSERVED", title="Objet de test", content="Contenu canonique.",
         component_id="CORE", function_id=None, brick_id=None, tags=["TEST"], proof_ids=[], supersedes_id=None, actor="test",
     )
-    for index, path in enumerate(CANONICAL_RESUME_DOCUMENTS, start=1):
-        store.append_knowledge(
-            knowledge_type="RULE", status="ACTIVE", title=f"Page canonique {index}",
-            content=f"Contenu canonique intégral de reprise {index} : ne jamais tronquer cette page.",
-            component_id="CORE", function_id=None, brick_id=None, tags=["RESUME"], proof_ids=[], supersedes_id=None,
-            actor="test", document_source=_source(path, index * 10),
-        )
     store.update_front({"subsystem": "test", "relevant_1_address": "ARET://knowledge/CORE-0001"}, "test")
     return store
 
@@ -75,11 +49,7 @@ def test_hooks_are_read_only_and_return_structured_context(tmp_path: Path) -> No
     assert resumed["result"]["relevant_addresses"] == ["ARET://knowledge/CORE-0001"]
     assert started["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert resumed["hookSpecificOutput"]["hookEventName"] == "PostCompact"
-    context = resumed["hookSpecificOutput"]["additionalContext"]
-    assert "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE" in context
-    for path in CANONICAL_RESUME_DOCUMENTS:
-        assert f"===== {path} — CONTENU CANONIQUE COMPLET =====" in context
-    assert "Contenu canonique intégral de reprise 5 : ne jamais tronquer cette page." in context
+    assert "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE" in resumed["hookSpecificOutput"]["additionalContext"]
 
 
 def test_git_memory_commit_is_explicit_and_scope_limited(tmp_path: Path) -> None:

@@ -13,11 +13,11 @@
 | Evidence Store | Preuves signées HMAC, artefacts hashés, invalidation et promotion contrôlée. |
 | Graphe | Relations typées, cycle de vie `ACTIVE` / `SUPERSEDED`, traversée historique opt-in. |
 | Roadmap V1.1 | Briques classées par jalon, plateforme et priorité ; vue et export de roadmap dérivés. |
-| Reprise Claude Code | Corpus SQLite complet injecté à `SessionStart` / `PostCompact`, puis récapitulatif rituel obligatoire contrôlé par `PreToolUse`, `PostToolUse` et `Stop`. |
+| Reprise Claude Code | Contexte complet à `SessionStart` / `PostCompact`, puis barrière obligatoire de lecture contrôlée par `PreToolUse`, `PostToolUse` et `Stop`. |
 | Pipelines et corpus | 27 pipelines nommés et fermés, politiques explicites, plan `dry_run` et artefacts hashés. |
 | Portabilité | Bundle v3 vérifié et synchronisation Git bornée exclusivement au Memory Store. |
 
-Le serveur expose **42 outils MCP**. Son contrat détaillé est disponible dans [`aret-memory/docs/CONTRAT_MCP_V1.md`](aret-memory/docs/CONTRAT_MCP_V1.md).
+Le serveur expose **41 outils MCP**. Son contrat détaillé est disponible dans [`aret-memory/docs/CONTRAT_MCP_V1.md`](aret-memory/docs/CONTRAT_MCP_V1.md).
 
 ## Installation locale
 
@@ -40,7 +40,7 @@ Ne publiez jamais une vraie clé HMAC, un jeton GitHub, un fichier `.env` ou un 
 
 ## Configuration Claude Code
 
-Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. À chaque `SessionStart` ou `PostCompact`, le contexte injecte automatiquement depuis SQLite le contenu intégral des documents 70, 80, 81, 82 et 90, ainsi que les huit dernières entrées complètes du journal 71, puis ajoute doctrine, Front, roadmap, audit, Git, assets, outils MCP et catalogue de pipelines. Les fichiers Markdown ne sont pas relus après compaction. Claude produit le récapitulatif rituel de ce contexte, puis appelle `aret_acknowledge_resume`. Tant que cette confirmation n’a pas réussi, les opérations de poursuite sont refusées et une tentative de fin reçoit une relance unique. Le hook échoue explicitement si le corpus dépasse sa borne de transport ; il ne le tronque jamais silencieusement.
+Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. À chaque `SessionStart` ou `PostCompact`, le contexte injecte automatiquement depuis SQLite doctrine, Front, extraits des règles, roadmap, journal 71, audit, Git, assets, outils MCP et catalogue de pipelines. Les documents source étant déjà ingérés, Claude ne les relit pas par défaut. Il produit le récapitulatif rituel de ce contexte, puis appelle `aret_acknowledge_resume`. Tant que cette confirmation n’a pas réussi, les opérations de poursuite sont refusées et une tentative de fin reçoit une relance unique.
 
 La configuration du serveur MCP doit faire pointer Claude Code vers :
 

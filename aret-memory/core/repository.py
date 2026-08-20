@@ -39,19 +39,6 @@ DEFAULT_MAX_BYTES = 65536
 HARD_MAX_ITEMS = 100
 HARD_MAX_BYTES = 262144
 
-# La reprise ARET doit contenir intégralement les documents opérationnels 70/80/81/82/90
-# et les dernières entrées 71, mais jamais le journal 71 historique entier. Cette borne
-# protège le transport de hook contre une injection silencieusement tronquée.
-RESUME_CANONICAL_DOCUMENTS = (
-    "docs/vision/70-reference-etat-methode-reste.md",
-    "docs/vision/80-orientations-architecturales.md",
-    "docs/vision/81-industrialisation.md",
-    "docs/vision/82-suivi-industrialisation.md",
-    "docs/vision/90-corpus-sources.md",
-)
-RESUME_JOURNAL_DOCUMENT = "docs/vision/71-journal-de-bord.md"
-RESUME_CONTEXT_MAX_BYTES = 512_000
-
 
 class AretError(ValueError):
     """Erreur métier retournable sans ambiguïté au client MCP."""
@@ -424,17 +411,11 @@ class MemoryStore:
         }
 
     def get_resume_context(self, journal_limit: int = 8, rule_limit: int = 12, excerpt_bytes: int = 480) -> dict[str, Any]:
-        """Construit un paquet de reprise complet exclusivement depuis SQLite.
+        """Construit le contexte automatique de reprise depuis SQLite, sans relecture de Markdown.
 
-        Les cinq documents de reprise demandés historiquement (70/80/81/82/90) sont
-        injectés intégralement depuis leurs pages canonisées. Les huit dernières entrées
-        du journal 71 sont aussi injectées intégralement. Le journal historique entier
-        reste volontairement hors paquet, car il dépasse à lui seul un contexte utile de
-        reprise ; il demeure adressable par ``aret_find``/``aret_read``.
-
-        Aucun Markdown n'est lu par le hook : toute donnée provient de ``knowledge`` et
-        de ``knowledge_source``. Une borne explicite échoue bruyamment plutôt que de
-        tronquer silencieusement une doctrine ou une information opérationnelle.
+        Le paquet contient des extraits déterministes des règles et du journal, le Front,
+        l’audit, la roadmap et les assets. Les bornes empêchent l’injection de masquer la
+        suite du contexte par une charge documentaire excessive.
         """
         if isinstance(excerpt_bytes, bool) or not isinstance(excerpt_bytes, int) or excerpt_bytes < 120 or excerpt_bytes > 1200:
             raise AretError("excerpt_bytes doit être compris entre 120 et 1200")
@@ -461,50 +442,16 @@ class MemoryStore:
                 enriched.append(row)
             return enriched
 
-        canonical_documents: list[dict[str, Any]] = []
-        canonical_bytes = 0
-        with self._read_connection() as conn:
-            for source_path in RESUME_CANONICAL_DOCUMENTS:
-                pages = [dict(row) for row in conn.execute(
-                    """SELECT DISTINCT k.id,k.type,k.status,k.title,k.content,
-                              ks.source_start_line,ks.source_end_line,ks.source_section
-                       FROM knowledge AS k JOIN knowledge_source AS ks ON ks.knowledge_id=k.id
-                       WHERE ks.source_path=?
-                       ORDER BY ks.source_start_line ASC,k.id ASC""",
-                    (source_path,),
-                ).fetchall()]
-                for page in pages:
-                    page["address"] = make_address("knowledge", str(page["id"]))
-                    canonical_bytes += len(str(page["content"]).encode("utf-8"))
-                if not pages:
-                    raise AretError(f"Document canonique absent du Store : {source_path}")
-                canonical_documents.append({"source_path": source_path, "pages": pages})
-
-        complete_journal: list[dict[str, Any]] = []
-        for item in brief["latest_document_71_entries"]:
-            page = dict(item)
-            page["content"] = content_by_id.get(str(page["id"]), "")
-            canonical_bytes += len(str(page["content"]).encode("utf-8"))
-            complete_journal.append(page)
-        if canonical_bytes > RESUME_CONTEXT_MAX_BYTES:
-            raise AretError(
-                f"Paquet de reprise canonique trop volumineux ({canonical_bytes} octets > {RESUME_CONTEXT_MAX_BYTES}) ; "
-                "la migration doit segmenter les documents avant tout nouveau hook."
-            )
-
         roadmap = self.get_roadmap(max_items=16)
         assets = self.get_assets(limit=12)["assets"]
         return {
             **brief["restore"],
             "rules": enrich(brief["rules"]),
             "latest_document_71_entries": enrich(brief["latest_document_71_entries"]),
-            "latest_document_71_complete_entries": complete_journal,
-            "canonical_resume_documents": canonical_documents,
-            "canonical_resume_bytes": canonical_bytes,
             "recent_audit": brief["recent_audit"],
             "roadmap": roadmap,
             "assets": assets,
-            "notice": "Paquet de reprise complet injecté depuis SQLite canonique ; les documents 70/80/81/82/90 et les dernières entrées 71 ne sont jamais tronqués et ne doivent pas être relus avant le récapitulatif rituel.",
+            "notice": "Paquet de reprise injecté depuis SQLite canonique ; aucun document source ne doit être relu avant le récapitulatif rituel.",
         }
 
     def get_resume_protocol(self, journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:

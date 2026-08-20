@@ -24,14 +24,14 @@ Les opérations de session, de synchronisation et de transport mémoire sont **d
 
 | Événement | Lanceur installé | Comportement |
 |---|---|---|
-| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Arme la barrière et injecte depuis SQLite le corpus complet 70/80/81/82/90, les huit dernières entrées 71, Front, Git, audit, assets et pipelines. |
+| `SessionStart` | `.claude/hooks/aret-mmu-session-start.sh` | Arme la barrière et injecte depuis SQLite doctrine, Front, règles, roadmap, journal 71, audit, assets, Git et pipelines. |
 | `PreCompact` | `.claude/hooks/aret-mmu-pre-compact.sh` | Retourne Front, audit récent borné et contexte de reprise ; checkpoint seulement sur activation. |
 | `PostCompact` | `.claude/hooks/aret-mmu-post-compact.sh` | Arme à nouveau la barrière et réinjecte le même paquet de reprise ; trace optionnelle de compaction. |
 | `PreToolUse` | `.claude/hooks/aret-mmu-resume-pre-tool.sh` | Refuse tout outil sauf `aret_acknowledge_resume` tant que le récapitulatif rituel n’est pas confirmé. |
 | `PostToolUse` | `.claude/hooks/aret-mmu-resume-post-tool.sh` | Valide la confirmation MCP du rituel et lève la barrière pour cette session. |
 | `Stop` | `.claude/hooks/aret-mmu-resume-stop.sh` | Fournit une relance unique lorsque l’agent tente de conclure sans récapitulatif confirmé. |
 
-`SessionStart` et `PostCompact` injectent depuis SQLite le contenu intégral, page par page, des documents 70, 80, 81, 82 et 90, ainsi que les huit dernières entrées complètes du journal 71. Ils ajoutent le Front, la roadmap, l’audit, les assets, la branche Git, les commits récents, l’état de l’arbre, les outils MCP et le catalogue de pipelines. Le hook échoue explicitement si le corpus canonique dépasse sa borne de transport : aucune troncature silencieuse n’est admise. Les fichiers Markdown ne sont donc pas relus après compaction. L’agent rédige le récapitulatif des règles, de l’état, des capacités, de Git, des limites et de la prochaine action, puis appelle `aret_acknowledge_resume`. L’état du garde est éphémère sous `.aret-memory/runtime/resume_guard/`, donc n’est ni une connaissance SQLite ni une donnée Git. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
+`SessionStart` injecte depuis SQLite la doctrine, les valeurs du Front, des extraits des règles actives, la roadmap, les dernières entrées du journal 71, l’audit, les assets, la branche Git, les commits récents, l’état de l’arbre, les outils MCP et le catalogue de pipelines. Les documents Markdown étant déjà ingérés, aucune relecture systématique n’est exigée. Après `SessionStart` ou `PostCompact`, l’agent rédige le récapitulatif des règles, de l’état, des capacités, de Git, des limites et de la prochaine action, puis appelle `aret_acknowledge_resume`. L’état du garde est éphémère sous `.aret-memory/runtime/resume_guard/`, donc n’est ni une connaissance SQLite ni une donnée Git. Le résumé de compaction, lorsqu’il est fourni, reste un champ d’audit et ne devient pas une connaissance canonique.
 
 ## Git mémoire local
 

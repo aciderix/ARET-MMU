@@ -66,18 +66,7 @@ def test_resume_context_injects_sqlite_excerpts_without_requiring_document_rerea
     assert all(item["content_excerpt"].startswith("Règle canonique") for item in context["rules"])
     assert [entry["source_start_line"] for entry in context["latest_document_71_entries"]] == [200, 100]
     assert all(item["content_excerpt"].startswith("Évolution canonique") for item in context["latest_document_71_entries"])
-    complete_documents = context["canonical_resume_documents"]
-    assert [document["source_path"] for document in complete_documents] == list(DOCUMENTS)
-    assert all(len(document["pages"]) == 1 for document in complete_documents)
-    assert complete_documents[-1]["pages"][0]["content"] == (
-        "Règle canonique 5 : correct ou arrêt bruyant, jamais de faux succès silencieux."
-    )
-    assert [entry["content"] for entry in context["latest_document_71_complete_entries"]] == [
-        "Évolution canonique 200 : état de l’industrialisation mis à jour.",
-        "Évolution canonique 100 : état de l’industrialisation mis à jour.",
-    ]
-    assert context["canonical_resume_bytes"] > 0
-    assert "aucun document source" not in context["notice"]
+    assert "aucun document source" in context["notice"]
     assert "required_read_batches" not in context
 
 
