@@ -56,7 +56,10 @@ HANDOFF_FIELDS = (
     "handoff_open_risks",
     "handoff_deferred_items",
 )
-HANDOFF_CONTROL_FIELDS = ("handoff_front_hash", "handoff_prepared_at")
+HANDOFF_CONTROL_FIELDS = (
+    "handoff_front_hash", "handoff_prepared_at",
+    "handoff_observation_pipeline_cutoff", "handoff_observation_proof_cutoff",
+)
 TECHNICAL_CHECKPOINT_STATE_FIELD = "handoff_technical_checkpoint_state"
 TECHNICAL_CHECKPOINT_FIELDS = (
     "handoff_technical_target",
@@ -77,6 +80,12 @@ TECHNICAL_CHECKPOINT_MAX_BYTES = {
 # La borne de transport globale reste 18 500 octets, sans troncature.
 RESUME_DOSSIER_MAX_BYTES = 12_500
 RESUME_DOSSIER_MIN_BYTES = 2_000
+# Resume Dossier V1.3 : fenêtre dérivée de faits machine déjà persistés.
+# Ces observations ne sont jamais une intention, un correctif ou une prochaine action.
+RESUME_OBSERVATION_MAX_ITEMS = 3
+RESUME_OBSERVATION_MAX_PARAMETER_BYTES = 120
+VALIDATION_RESULT_RE = re.compile(r"\b(PASS|FAIL|ERROR|SKIPPED|UNKNOWN)\b", re.IGNORECASE)
+VALIDATION_REFERENCE_RE = re.compile(r"ARET://(pipeline|proof)/([A-Za-z0-9_-]{2,32})")
 
 
 class AretError(ValueError):
@@ -553,6 +562,106 @@ class MemoryStore:
             raise AretError("technical_checkpoint_state doit être NONE ou ACTIVE")
         return state
 
+    @staticmethod
+    def _observation_parameter_summary(parameters_json: str) -> str:
+        """Rend au plus deux paramètres scalaires ; le détail exact reste adressable par pipeline_run."""
+        try:
+            parameters = json.loads(parameters_json)
+        except (TypeError, ValueError):
+            return ""
+        if not isinstance(parameters, dict):
+            return ""
+        pairs: list[str] = []
+        for key in sorted(parameters):
+            value = parameters[key]
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                pairs.append(f"{str(key)[:32]}={str(value)[:48]}")
+            if len(pairs) == 2:
+                break
+        summary = ", ".join(pairs)
+        encoded = summary.encode("utf-8")[:RESUME_OBSERVATION_MAX_PARAMETER_BYTES]
+        return encoded.decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _id_after_cutoff(identifier: str, cutoff: str) -> bool:
+        if not cutoff:
+            return True
+        match_identifier = re.search(r"-(\d+)$", identifier)
+        match_cutoff = re.search(r"-(\d+)$", cutoff)
+        if not match_identifier or not match_cutoff:
+            return False
+        return int(match_identifier.group(1)) > int(match_cutoff.group(1))
+
+    def _resume_observations_rows(
+        self, conn: sqlite3.Connection, prepared_at: str, pipeline_cutoff: str, proof_cutoff: str,
+    ) -> dict[str, Any]:
+        """Vue V1.3 dérivée des exécutions persistées, jamais des intentions de l’agent."""
+        if not prepared_at:
+            return {"since": "", "total": 0, "items": []}
+        rows: list[dict[str, Any]] = []
+        pipeline_rows = conn.execute(
+            """SELECT id,pipeline_name,result,parameters_json,artifact_hash,finished_at,created_at
+               FROM pipeline_run ORDER BY created_at DESC,id DESC"""
+        ).fetchall()
+        for row in pipeline_rows:
+            item = dict(row)
+            if not self._id_after_cutoff(str(item["id"]), pipeline_cutoff):
+                continue
+            rows.append({
+                "kind": "PIPELINE_RUN", "name": item["pipeline_name"], "result": item["result"],
+                "timestamp": item["finished_at"] or item["created_at"], "address": make_address("pipeline", item["id"]),
+                "artifact_hash": item["artifact_hash"],
+                "parameters": self._observation_parameter_summary(item["parameters_json"]),
+            })
+        proof_rows = conn.execute(
+            """SELECT id,kind,result,artifact_hash,finished_at,created_at
+               FROM proof ORDER BY created_at DESC,id DESC"""
+        ).fetchall()
+        for row in proof_rows:
+            item = dict(row)
+            if not self._id_after_cutoff(str(item["id"]), proof_cutoff):
+                continue
+            rows.append({
+                "kind": "ORACLE_PROOF", "name": item["kind"], "result": item["result"],
+                "timestamp": item["finished_at"] or item["created_at"], "address": make_address("proof", item["id"]),
+                "artifact_hash": item["artifact_hash"], "parameters": "",
+            })
+        rows.sort(key=lambda item: (str(item["timestamp"]), str(item["address"])), reverse=True)
+        return {"since": prepared_at, "total": len(rows), "items": rows[:RESUME_OBSERVATION_MAX_ITEMS]}
+
+    def get_resume_observations(self) -> dict[str, Any]:
+        """Expose la fenêtre V1.3 des seuls faits machine persistés depuis le handoff."""
+        with self._read_connection() as conn:
+            front = self.get_front()
+            prepared_at = str(front["state"].get("handoff_prepared_at", {}).get("value", ""))
+            pipeline_cutoff = str(front["state"].get("handoff_observation_pipeline_cutoff", {}).get("value", ""))
+            proof_cutoff = str(front["state"].get("handoff_observation_proof_cutoff", {}).get("value", ""))
+            return self._resume_observations_rows(conn, prepared_at, pipeline_cutoff, proof_cutoff)
+
+    def _last_validation_machine_status(self, conn: sqlite3.Connection, last_validation: str) -> dict[str, Any]:
+        """Vérifie seulement une revendication qui fournit une adresse canonique et un verdict explicite."""
+        result_match = VALIDATION_RESULT_RE.search(last_validation)
+        reference_match = VALIDATION_REFERENCE_RE.search(last_validation)
+        if not result_match:
+            return {"status": "NO_MACHINE_CLAIM", "address": "", "result": ""}
+        claimed_result = result_match.group(1).upper()
+        if not reference_match:
+            return {"status": "DECLARED_UNVERIFIED", "address": "", "result": claimed_result}
+        resource_type, identifier = reference_match.groups()
+        if resource_type == "pipeline":
+            row = conn.execute("SELECT result FROM pipeline_run WHERE id=?", (identifier,)).fetchone()
+        else:
+            row = conn.execute("SELECT result FROM proof WHERE id=?", (identifier,)).fetchone()
+        address = make_address(resource_type, identifier)
+        if row is None:
+            raise AretError(f"last_validation référence une observation MCP absente : {address}")
+        observed_result = str(row["result"]).upper()
+        if observed_result != claimed_result:
+            raise AretError(
+                f"last_validation contradictoire : {address} retourne {observed_result}, pas {claimed_result}"
+            )
+        return {"status": "MACHINE_VERIFIED", "address": address, "result": observed_result}
+
     def prepare_handoff(
         self,
         *,
@@ -620,11 +729,17 @@ class MemoryStore:
             values[TECHNICAL_CHECKPOINT_STATE_FIELD] = checkpoint_state
             values["last_action"] = "Aucun checkpoint technique actif lors de la préparation du handoff."
         with self._transaction() as conn:
+            if checkpoint_state == "ACTIVE":
+                self._last_validation_machine_status(conn, checkpoint["handoff_last_validation"])
             for address in addresses:
                 knowledge_id = parse_address(address).identifier
                 if not conn.execute("SELECT 1 FROM knowledge WHERE id=?", (knowledge_id,)).fetchone():
                     raise NotFoundError(f"Adresse chaude introuvable : {address}")
             before = self._front_rows(conn)
+            pipeline_row = conn.execute("SELECT id FROM pipeline_run ORDER BY created_at DESC,id DESC LIMIT 1").fetchone()
+            proof_row = conn.execute("SELECT id FROM proof ORDER BY created_at DESC,id DESC LIMIT 1").fetchone()
+            values["handoff_observation_pipeline_cutoff"] = str(pipeline_row["id"]) if pipeline_row else ""
+            values["handoff_observation_proof_cutoff"] = str(proof_row["id"]) if proof_row else ""
             for index in range(1, 6):
                 key = f"relevant_{index}_address"
                 if index <= len(addresses):
@@ -679,6 +794,23 @@ class MemoryStore:
                         errors.append(f"Checkpoint technique invalide : {key} dépasse sa borne")
             elif any(checkpoint[key] for key in TECHNICAL_CHECKPOINT_FIELDS):
                 errors.append("Checkpoint technique NONE incohérent : les champs doivent être vides")
+            validation_status = {"status": "NOT_APPLICABLE", "address": "", "result": ""}
+            if checkpoint_state == "ACTIVE" and all(checkpoint[key] for key in TECHNICAL_CHECKPOINT_FIELDS):
+                try:
+                    validation_status = self._last_validation_machine_status(conn, checkpoint["handoff_last_validation"])
+                except AretError as exc:
+                    errors.append(str(exc))
+            checkpoint["last_validation_machine_status"] = validation_status
+            prepared_at = str(state.get("handoff_prepared_at", {}).get("value", ""))
+            missing_observation_controls = [key for key in HANDOFF_CONTROL_FIELDS[2:] if key not in state]
+            if missing_observation_controls:
+                errors.append("Handoff V1.3 incomplet : " + ", ".join(missing_observation_controls))
+            observations = self._resume_observations_rows(
+                conn,
+                prepared_at,
+                str(state.get("handoff_observation_pipeline_cutoff", {}).get("value", "")),
+                str(state.get("handoff_observation_proof_cutoff", {}).get("value", "")),
+            )
             stored_hash = str(state.get("handoff_front_hash", {}).get("value", ""))
             current_hash = self._front_resume_hash(state)
             if stored_hash and stored_hash != current_hash:
@@ -693,7 +825,8 @@ class MemoryStore:
                     "technical_checkpoint": checkpoint,
                 },
                 "front": front,
-                "prepared_at": str(state.get("handoff_prepared_at", {}).get("value", "")),
+                "prepared_at": prepared_at,
+                "observations": observations,
             }
             contract_hash = sha256_text(canonical_json(contract))
             # Le Front complet sert à l’audit et au hash ; il ne doit pas être compté
@@ -703,6 +836,7 @@ class MemoryStore:
                 "playbook": [{key: item[key] for key in ("id", "title", "content", "domains", "address")} for item in playbook],
                 "handoff": contract["handoff"],
                 "relevant_addresses": front["relevant_addresses"],
+                "observations": observations,
             }
             size_bytes = len(canonical_json(budget_payload).encode("utf-8"))
             if size_bytes > RESUME_DOSSIER_MAX_BYTES:
@@ -718,6 +852,7 @@ class MemoryStore:
                 "next_action": contract["handoff"]["next_action"],
                 "technical_checkpoint": checkpoint,
             },
+            "observations": observations,
             "front": front,
             "prepared_at": contract["prepared_at"],
             "contract_hash": contract_hash,

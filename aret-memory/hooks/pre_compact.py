@@ -21,8 +21,9 @@ def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "front": front,
         "recent_audit": store.audit_events(limit),
         "read_after_resume": front["relevant_addresses"],
+        "observations": store.get_resume_observations(),
         "checkpoint": checkpoint,
-        "notice": "Checkpoint audit optionnel ; les connaissances durables passent toujours par les outils MCP contrôlés.",
+        "notice": "PreCompact restitue des faits machine déjà persistés, sans créer de checkpoint d’intention ; les connaissances durables passent toujours par les outils MCP contrôlés.",
     }
 
 

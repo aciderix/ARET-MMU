@@ -98,14 +98,47 @@ def _technical_checkpoint_lines(handoff: dict[str, Any]) -> list[str]:
             "\\n### CHECKPOINT TECHNIQUE — GESTE INTERROMPU",
             "Aucun checkpoint technique actif : aucun geste technique ne doit être inventé pour cette reprise.",
         ]
+    verification = checkpoint.get("last_validation_machine_status", {})
+    status = verification.get("status", "DECLARED_UNVERIFIED") if isinstance(verification, dict) else "DECLARED_UNVERIFIED"
+    if status == "MACHINE_VERIFIED":
+        validation_note = "MACHINE_VERIFIED : " + str(verification.get("address", "")) + " → " + str(verification.get("result", ""))
+    elif status == "DECLARED_UNVERIFIED":
+        validation_note = "DÉCLARÉ — NON VÉRIFIÉ PAR MCP : aucune adresse pipeline/preuve canonique n’accompagne ce verdict."
+    else:
+        validation_note = "Aucun verdict machine déclaré dans ce checkpoint."
     return [
         "\\n### CHECKPOINT TECHNIQUE — GESTE INTERROMPU",
         "Cible exacte : " + str(checkpoint.get("handoff_technical_target", "")),
         "Dernier changement : " + str(checkpoint.get("handoff_technical_change", "")),
         "État d’exécution : " + str(checkpoint.get("handoff_execution_state", "")),
-        "Dernière validation : " + str(checkpoint.get("handoff_last_validation", "")),
+        "Dernière validation déclarée : " + str(checkpoint.get("handoff_last_validation", "")),
+        "Statut de cette déclaration : " + validation_note,
         "Actions immédiates : " + str(checkpoint.get("handoff_immediate_actions", "")),
     ]
+
+
+def _observation_lines(dossier: dict[str, Any]) -> list[str]:
+    observations = dossier.get("observations", {}) if isinstance(dossier, dict) else {}
+    if not isinstance(observations, dict):
+        observations = {}
+    total = int(observations.get("total", 0) or 0)
+    items = observations.get("items", [])
+    lines = ["\\n### OBSERVATIONS MCP FACTUELLES DEPUIS LE CHECKPOINT"]
+    if not isinstance(items, list) or not items:
+        lines.append("Aucune observation MCP résultat-portante depuis le checkpoint. Cela ne permet pas de conclure qu’aucune action hors MCP n’a eu lieu.")
+        return lines
+    lines.append(f"{len(items)} dernière(s) observation(s) affichée(s) sur {total} fait(s) machine disponible(s).")
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        parameters = str(item.get("parameters", "")).strip()
+        suffix = f" ; paramètres: {parameters}" if parameters else ""
+        lines.append(
+            f"- [{item.get('timestamp', '?')}] {item.get('kind', '?')} {item.get('name', '?')} → {item.get('result', '?')}"
+            f" | {item.get('address', '?')} | artefact sha256: {item.get('artifact_hash', '')}{suffix}"
+        )
+    lines.append("Ces faits observés ne décrivent ni intention, ni correctif, ni prochaine action.")
+    return lines
 
 
 def additional_context(result: dict[str, Any]) -> str:
@@ -165,11 +198,12 @@ def additional_context(result: dict[str, Any]) -> str:
     if isinstance(toolchain, dict):
         tools = toolchain.get("tools", {})
         if isinstance(tools, dict):
-            available = [name for name, item in tools.items() if isinstance(item, dict) and item.get("available")]
-            missing = [name for name, item in tools.items() if isinstance(item, dict) and not item.get("available")]
-            lines.append("Toolchain disponible : " + ", ".join(available[:12]))
-            if missing:
-                lines.append("Toolchain indisponible : " + ", ".join(missing[:12]))
+            states = [
+                f"{name}={'AVAILABLE' if isinstance(item, dict) and item.get('available') else 'UNAVAILABLE'}"
+                for name, item in sorted(tools.items())
+            ]
+            lines.append("Toolchain observée : " + " ; ".join(states[:16]))
+    lines.extend(_observation_lines(dossier))
     lines.append("Outils MCP par capacité : " + _compact_tool_groups())
 
     git = result.get("git_context", {})
