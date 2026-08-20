@@ -15,7 +15,7 @@
 | Promotion `PROVEN` | Refusée sans preuve `PASS` **admissible** et explicitement liée |
 | Écriture | Désactivée par défaut ; mutations contrôlées, transactionnelles et auditées après activation explicite |
 | Protocole | Stdio par défaut ; HTTP Streamable en option pour un déploiement local contrôlé |
-| Resume Dossier V1 | Playbook tagué, handoff atomique, contrôle de fraîcheur et contexte de reprise borné |
+| Resume Dossier V1.1 | Playbook tagué enrichi de trois fiches opérationnelles dérivées, handoff atomique, contrôle de fraîcheur et contexte de reprise borné |
 
 ## Périmètre V1
 
@@ -35,7 +35,7 @@ Le projet livre un serveur MCP réellement exécutable, des migrations SQLite ve
 | Journal 71 | Disponible : 378 entrées datées, contenu exact, provenance et contrôle d’exhaustivité. |
 | Trackers 82 et 90 | Disponible : 50 sections non chevauchantes avec provenance et contrôle d’intégrité. |
 | Corpus documentaire central | Disponible : 514 objets sourcés, index FTS5 reconstruit et vérifié. |
-| Hooks de cycle de vie Claude Code | Disponible : Resume Dossier V1 contractuel injecté à `SessionStart` / `PostCompact`, puis barrière de reprise obligatoire |
+| Hooks de cycle de vie Claude Code | Disponible : Resume Dossier V1.1 contractuel injecté à `SessionStart` / `PostCompact`, puis barrière de reprise obligatoire |
 | Synchronisation Git automatique et résolution de conflits | Opt-in, bornée au Memory Store ; `auto_push=false` par défaut |
 
 ## Prérequis et installation
@@ -80,7 +80,7 @@ Le fichier de configuration suivant est un modèle. Remplacez les chemins par ce
 }
 ```
 
-Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` et `PostCompact`, les hooks injectent un **Resume Dossier V1** compact et contractuel : playbook stable à cinq domaines, handoff actif, cinq adresses chaudes au plus, capacités/pipelines, état Git et rituel. Il ne relit ni n’injecte massivement les documents historiques. Produisez le récapitulatif rituel des six volets, puis appelez `aret_acknowledge_resume` avec l’empreinte `resume_contract_hash` affichée dans le dossier : les hooks refusent toute autre opération tant que cette confirmation du même contrat n’a pas réussi. Ne relisez les sources que pour un approfondissement ciblé sur une adresse. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
+Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` et `PostCompact`, les hooks injectent un **Resume Dossier V1.1** compact et contractuel : playbook stable à cinq domaines, dont des fiches opérationnelles dérivées de méthode, gates et diagnostic ; handoff actif ; cinq adresses chaudes au plus ; capacités/pipelines ; état Git ; et rituel. Il ne relit ni n’injecte massivement les documents historiques. Produisez le récapitulatif rituel des six volets, puis appelez `aret_acknowledge_resume` avec l’empreinte `resume_contract_hash` affichée dans le dossier : les hooks refusent toute autre opération tant que cette confirmation du même contrat n’a pas réussi. Ne relisez les sources que pour un approfondissement ciblé sur une adresse. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
 
 | Outil | Usage |
 |---|---|
@@ -89,7 +89,7 @@ Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` 
 | `aret_restore` | Restitue le noyau de reprise : doctrine, versions et Active Front, sans historique massif. |
 | `aret_get_resume_brief` / `aret_get_resume_protocol` | Restituent les pointeurs canoniques utiles à une investigation ciblée ; ils ne déclenchent aucune relecture obligatoire. |
 | `aret_acknowledge_resume` | Confirme les six volets du rituel et le `resume_contract_hash` du dossier injecté après SessionStart ou PostCompact. |
-| `aret_prepare_handoff` | Met à jour atomiquement le handoff actif et initialise le playbook V5 tagué si nécessaire. |
+| `aret_prepare_handoff` | Met à jour atomiquement le handoff actif ; le playbook est préparé séparément par son bootstrap de migration one-off. |
 | `aret_find` | Découvre des candidats par composant, tag, type, statut, dates ou FTS5. |
 | `aret_read` / `aret_read_batch` | Restitue le contenu canonique, le hash et les métadonnées d’une ou plusieurs adresses connues. |
 | `aret_get_forensics` | Découvre les forensics liés à un composant ou une fonction. |
@@ -161,6 +161,9 @@ python3 migration/verify_journal_71.py
 # Migration structurée des trackers 82/90, puis vérification.
 python3 migration/import_trackers_82_90.py
 python3 migration/verify_trackers_82_90.py
+
+# Une fois les sources historiques présentes : fiches opérationnelles compactes du Resume Dossier V1.1.
+python3 migration/bootstrap_playbook_v11.py --memory-dir .aret-memory
 ```
 
 Les détails sont documentés dans [`MIGRATION_PILOTE_70_71_80_81.md`](docs/MIGRATION_PILOTE_70_71_80_81.md), [`MIGRATION_REFERENCES_70_80_81.md`](docs/MIGRATION_REFERENCES_70_80_81.md), [`MIGRATION_JOURNAL_71.md`](docs/MIGRATION_JOURNAL_71.md), [`MIGRATION_TRACKERS_82_90.md`](docs/MIGRATION_TRACKERS_82_90.md) et [`SOURCE_INVENTORY.md`](docs/SOURCE_INVENTORY.md).
@@ -189,13 +192,13 @@ Les conventions et le contrat détaillé sont dans [`docs/MEMOIRE_STRATEGIQUE_CA
 
 ## Intégration opérationnelle
 
-Les scripts `hooks/session_start.py`, `hooks/pre_compact.py` et `hooks/post_compact.py` organisent le cycle de reprise. `SessionStart` et `PostCompact` exigent un Resume Dossier V1 prêt : cinq entrées de playbook `CORE_PLAYBOOK` couvrant fondation, méthode, architecture shared-stack, portes et outillage ; un handoff Front préparé atomiquement ; et un hash du Front identique à celui mémorisé par le handoff. Le dossier seul est refusé au-delà de 12 500 octets, le contexte final au-delà de 18 500 octets, sans troncature silencieuse. Les hooks `PreToolUse`, `PostToolUse` et `Stop` appliquent ensuite une barrière : les six sections du récapitulatif et le hash contractuel injecté doivent être confirmés par `aret_acknowledge_resume` avant toute autre opération. Les opérations Git sont limitées au Memory Store ; une synchronisation automatique post-transaction reste opt-in (`auto_commit=false`, `auto_push=false` par défaut), bornée à `.aret-memory/` depuis la racine Git et précédée d’un checkpoint WAL. Les Memory Bundles v3 permettent un transport vérifié sans fusion implicite.
+Les scripts `hooks/session_start.py`, `hooks/pre_compact.py` et `hooks/post_compact.py` organisent le cycle de reprise. `SessionStart` et `PostCompact` exigent un Resume Dossier V1.1 prêt : cinq domaines de playbook `CORE_PLAYBOOK` couvrant fondation, méthode, architecture shared-stack, portes et outillage ; trois fiches opérationnelles dérivées compactes ; un handoff Front préparé atomiquement ; et un hash du Front identique à celui mémorisé par le handoff. Le script `migration/bootstrap_playbook_v11.py` crée les fiches dérivées et leurs relations `DERIVED_FROM` de façon idempotente ; il n’est jamais exécuté par `aret_prepare_handoff`, les hooks ou le chemin de routine. Le dossier seul est refusé au-delà de 12 500 octets, le contexte final au-delà de 18 500 octets, sans troncature silencieuse. Les hooks `PreToolUse`, `PostToolUse` et `Stop` appliquent ensuite une barrière : les six sections du récapitulatif et le hash contractuel injecté doivent être confirmés par `aret_acknowledge_resume` avant toute autre opération. Les opérations Git sont limitées au Memory Store ; une synchronisation automatique post-transaction reste opt-in (`auto_commit=false`, `auto_push=false` par défaut), bornée à `.aret-memory/` depuis la racine Git et précédée d’un checkpoint WAL. Les Memory Bundles v3 permettent un transport vérifié sans fusion implicite.
 
 Le guide complet et les commandes reproductibles sont disponibles dans [`docs/INTEGRATION_OPERATIONNELLE.md`](docs/INTEGRATION_OPERATIONNELLE.md) et [`docs/CONTRATS_OPERATIONNELS.md`](docs/CONTRATS_OPERATIONNELS.md).
 
 ## Tests de non-régression
 
-La suite vérifie notamment l’absence de promotion `PROVEN` sans reçu de preuve valide, la séparation FIND/READ, la borne de `READ_BATCH`, le versionnement append-first, l’audit, la reconstruction FTS5, l’intégrité des artefacts, le playbook à cinq domaines, le handoff atomique, le contrôle de fraîcheur et le blocage de reprise tant que le hash contractuel ne correspond pas.
+La suite vérifie notamment l’absence de promotion `PROVEN` sans reçu de preuve valide, la séparation FIND/READ, la borne de `READ_BATCH`, le versionnement append-first, l’audit, la reconstruction FTS5, l’intégrité des artefacts, le playbook à cinq domaines, le bootstrap V1.1 idempotent, ses relations de provenance, les règles opérationnelles injectées, le handoff atomique, le contrôle de fraîcheur et le blocage de reprise tant que le hash contractuel ne correspond pas.
 
 ```bash
 pytest -q

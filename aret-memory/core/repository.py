@@ -530,9 +530,8 @@ class MemoryStore:
         relevant_addresses: Sequence[str] | None,
         actor: str,
     ) -> dict[str, Any]:
-        """Met à jour atomiquement le handoff actif et assure le playbook V5 tagué."""
+        """Met à jour atomiquement le handoff actif, sans initialisation de playbook."""
         self._require_write()
-        self._bootstrap_resume_playbook(actor)
         addresses: list[str] = []
         for raw in list(relevant_addresses or []):
             try:
