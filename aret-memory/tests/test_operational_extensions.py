@@ -47,6 +47,9 @@ def test_hooks_are_read_only_and_return_structured_context(tmp_path: Path) -> No
     assert started["result"]["front"]["relevant_addresses"] == ["ARET://knowledge/CORE-0001"]
     assert compacted["result"]["read_after_resume"] == ["ARET://knowledge/CORE-0001"]
     assert resumed["result"]["relevant_addresses"] == ["ARET://knowledge/CORE-0001"]
+    assert started["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert resumed["hookSpecificOutput"]["hookEventName"] == "PostCompact"
+    assert "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE" in resumed["hookSpecificOutput"]["additionalContext"]
 
 
 def test_git_memory_commit_is_explicit_and_scope_limited(tmp_path: Path) -> None:

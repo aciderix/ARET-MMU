@@ -199,9 +199,9 @@ def run(hook_name: str, handler: Any) -> None:
         payload = input_payload()
         result = handler(store_from_payload(payload), payload)
         response: dict[str, Any] = {"ok": True, "hook": hook_name, "result": result}
-        if hook_name == "SessionStart":
+        if hook_name in {"SessionStart", "PostCompact"}:
             response["hookSpecificOutput"] = {
-                "hookEventName": "SessionStart",
+                "hookEventName": hook_name,
                 "additionalContext": additional_context(result),
             }
         emit(response)
