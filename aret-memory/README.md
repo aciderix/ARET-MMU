@@ -79,14 +79,15 @@ Le fichier de configuration suivant est un modèle. Remplacez les chemins par ce
 }
 ```
 
-Après connexion, appelez `aret_boot`, puis `aret_get_front`. Lorsqu’une session vient de démarrer ou d’être compactée, commencez par `aret_get_resume_protocol`, puis lisez tous ses lots avec `aret_read_batch` : les hooks refusent toute autre opération tant que ces pages canoniques ne sont pas confirmées. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
+Après connexion, appelez `aret_boot`, puis `aret_get_front`. Lorsqu’une session vient de démarrer ou d’être compactée, les hooks injectent automatiquement depuis SQLite doctrine, règles, Front, roadmap, journal 71, audit, Git, assets et catalogue de pipelines. Produisez le récapitulatif rituel de ce paquet, puis appelez `aret_acknowledge_resume` : les hooks refusent toute autre opération tant que cette confirmation n’a pas réussi. Ne relisez les documents source qu’en cas d’approfondissement ciblé. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
 
 | Outil | Usage |
 |---|---|
 | `aret_boot` | Lit doctrine, version du format, mode écriture et bornes. |
 | `aret_get_front` | Récupère la mémoire chaude minimale. |
 | `aret_restore` | Restitue le noyau de reprise : doctrine, versions et Active Front, sans historique massif. |
-| `aret_get_resume_brief` / `aret_get_resume_protocol` | Restituent les pointeurs de reprise, puis les lots obligatoires issus des documents 70/80/81/82/90 et du journal 71. |
+| `aret_get_resume_brief` / `aret_get_resume_protocol` | Restituent les pointeurs canoniques utiles à une investigation ciblée ; ils ne déclenchent aucune relecture obligatoire. |
+| `aret_acknowledge_resume` | Confirme le récapitulatif rituel du contexte SQLite injecté après SessionStart ou PostCompact. |
 | `aret_find` | Découvre des candidats par composant, tag, type, statut, dates ou FTS5. |
 | `aret_read` / `aret_read_batch` | Restitue le contenu canonique, le hash et les métadonnées d’une ou plusieurs adresses connues. |
 | `aret_get_forensics` | Découvre les forensics liés à un composant ou une fonction. |

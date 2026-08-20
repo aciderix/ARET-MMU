@@ -16,7 +16,7 @@ ARET-MMU relie désormais la mémoire SQLite canonique au cycle de session Claud
 
 Le fichier `.claude/settings.json` du dépôt ARET configure `SessionStart`, `PreCompact`, `PostCompact`, `PreToolUse`, `PostToolUse` et `Stop`. Le dépôt principal peut lancer son hook de préparation avant le hook ARET-MMU ; la distribution autonome ARET-MMU ne dépend que de ses propres wrappers. Le contexte de reprise est issu de SQLite et du statut Git en lecture seule, jamais d’une reconstruction heuristique de conversation.
 
-`SessionStart` et `PostCompact` émettent une réponse JSON contenant `hookSpecificOutput.additionalContext`. Claude Code reçoit doctrine, Front, règles, dernières entrées 71, audit, branche et commits, état de l’arbre et catalogue de pipelines. Simultanément, le garde éphémère exige que l’agent appelle `aret_get_resume_protocol` puis consomme chaque lot avec `aret_read_batch`. Ces lots couvrent toutes les pages canonisées des documents 70, 80, 81, 82 et 90, plus les huit dernières entrées du document 71. `PreToolUse` refuse toute action hors lecture jusqu’à la dernière adresse ; `PostToolUse` crédite seulement une lecture MCP réussie ; `Stop` émet une relance unique lorsque `stop_hook_active` n’est pas déjà fixé.
+`SessionStart` et `PostCompact` émettent une réponse JSON contenant `hookSpecificOutput.additionalContext`. Claude Code reçoit automatiquement depuis SQLite doctrine, Front, extraits des règles, roadmap, dernières entrées 71, audit, assets, branche et commits, état de l’arbre, outils MCP et catalogue de pipelines. Les documents source ont déjà été ingérés : ils ne sont pas relus par défaut. Le garde éphémère exige plutôt que l’agent produise le récapitulatif des règles, de l’état, des capacités, de Git, des limites et de la prochaine action, puis appelle `aret_acknowledge_resume`. `PreToolUse` refuse toute autre action jusqu’à cette confirmation ; `PostToolUse` valide une confirmation MCP réussie ; `Stop` émet une relance unique lorsque `stop_hook_active` n’est pas déjà fixé.
 
 Les checkpoints Pre/PostCompact restent non destructifs par défaut. Pour auditer les événements de compaction dans `audit_event`, activez explicitement la variable suivante dans l’environnement du runtime Claude Code.
 
@@ -34,7 +34,7 @@ printf '{"source":"compact"}\n' | \
   CLAUDE_PROJECT_DIR="$PWD" .claude/hooks/aret-mmu-session-start.sh
 ```
 
-La réponse doit contenir une clé `hookSpecificOutput` dont `hookEventName` vaut `SessionStart`, un `additionalContext` non vide et un résumé `resume_guard`. Dans Claude Code, la commande `/hooks` permet ensuite de vérifier les six événements effectivement configurés. Tenter une opération `Bash`, `Edit` ou `Write` avant la lecture des lots doit produire un refus `PreToolUse`.
+La réponse doit contenir une clé `hookSpecificOutput` dont `hookEventName` vaut `SessionStart`, un `additionalContext` non vide, les extraits de contexte SQLite et un résumé `resume_guard`. Dans Claude Code, la commande `/hooks` permet ensuite de vérifier les six événements effectivement configurés. Tenter une opération `Bash`, `Edit` ou `Write` avant l’appel réussi à `aret_acknowledge_resume` doit produire un refus `PreToolUse`.
 
 ## Git limité au Memory Store
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from core.repository import AretError, MemoryStore
 from evidence.adapters.oracles import run_oracle
 from evidence.adapters.pipelines import pipeline_catalog, register_asset, run_pipeline, toolchain_status
+from hooks.resume_guard import validate_recap
 from ops.git_memory import GitMemoryError, automatic_sync
 
 SERVER_INSTRUCTIONS = """ARET-MMU fournit une mémoire durable déterministe et une façade de pipelines ARET à liste fermée. Utilisez FIND uniquement pour découvrir des candidats, puis READ ou READ_BATCH sur les adresses explicitement sélectionnées pour récupérer le contenu canonique. Ne déduisez jamais une preuve d’un score de recherche. PROVEN exige une preuve PASS admissible. Consultez d’abord aret_get_pipeline_catalog et utilisez aret_run_pipeline en dry_run ; les pipelines génératifs, réseau et sensibles exigent leurs confirmations explicites. Aucun shell, URL ou push Git arbitraire n’est exposé."""
@@ -63,8 +64,40 @@ def aret_get_resume_brief(journal_limit: int = 8, rule_limit: int = 20, audit_li
 
 @mcp.tool()
 def aret_get_resume_protocol(journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:
-    """Retourne la liste et les lots de lectures obligatoires des documents 70/80/81/82/90 et des dernières entrées 71."""
+    """Compatibilité : retourne les pointeurs documentaires, sans imposer leur relecture après reprise."""
     return _call("get_resume_protocol", journal_limit=journal_limit, batch_size=batch_size)
+
+
+@mcp.tool()
+def aret_acknowledge_resume(
+    working_rules: str,
+    current_state: str,
+    capabilities: str,
+    git_state: str,
+    risks_and_limits: str,
+    next_action: str,
+) -> dict[str, Any]:
+    """Valide le récapitulatif rituel requis après SessionStart ou PostCompact avant toute poursuite ARET."""
+    try:
+        recap = validate_recap({
+            "working_rules": working_rules,
+            "current_state": current_state,
+            "capabilities": capabilities,
+            "git_state": git_state,
+            "risks_and_limits": risks_and_limits,
+            "next_action": next_action,
+        })
+        return {
+            "ok": True,
+            "operation": "acknowledge_resume",
+            "result": {
+                "acknowledged": True,
+                "sections": list(recap),
+                "notice": "Le récapitulatif est formellement complet. Le hook PostToolUse lève la barrière pour cette session.",
+            },
+        }
+    except ValueError as exc:
+        return {"ok": False, "operation": "acknowledge_resume", "error": {"code": "AretError", "message": str(exc)}}
 
 
 @mcp.tool()

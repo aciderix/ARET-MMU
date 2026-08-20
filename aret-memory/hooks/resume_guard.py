@@ -1,7 +1,10 @@
 """Garde déterministe de reprise ARET-MMU.
 
-Le garde n’accorde l’usage des outils qu’après lecture MCP des adresses critiques.
-Son état est purement local et éphémère, sous `.aret-memory/runtime/`, jamais dans SQLite ni Git.
+Le contexte de reprise est injecté depuis SQLite au démarrage et après compaction.
+Le garde n'impose pas une relecture des documents ingérés : il exige uniquement
+un récapitulatif structuré de ce contexte avant toute action de poursuite.
+Son état est local et éphémère, sous `.aret-memory/runtime/`, jamais dans
+SQLite ni Git.
 """
 
 from __future__ import annotations
@@ -17,6 +20,16 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+RITUAL_FIELDS: tuple[tuple[str, str, int], ...] = (
+    ("working_rules", "règles de travail incontournables", 80),
+    ("current_state", "état courant, Front et objectifs", 60),
+    ("capabilities", "outils MCP, analyse, industrialisation et pipelines", 80),
+    ("git_state", "branche, commits et état Git", 40),
+    ("risks_and_limits", "limites, preuves et garde-fous", 60),
+    ("next_action", "prochaine action proposée", 30),
+)
 
 
 def utc_now() -> str:
@@ -46,53 +59,66 @@ def load_state(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | No
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict) or value.get("version") != 2:
+        return None
+    return value
 
 
-def arm(memory_dir: Path, payload: dict[str, Any], addresses: list[str], reason: str) -> dict[str, Any]:
-    canonical = sorted({item for item in addresses if isinstance(item, str) and item.startswith("ARET://knowledge/")})
-    armed_at = utc_now()
-    state = {
-        "version": 1,
-        "armed_at": armed_at,
-        "reason": reason,
-        "status": "active" if canonical else "not_applicable",
-        "required_addresses": canonical,
-        "remaining_addresses": canonical,
-        "completed_at": None if canonical else armed_at,
-    }
+def _write_state(memory_dir: Path, payload: dict[str, Any], state: dict[str, Any]) -> None:
     path = state_path(memory_dir, payload)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def arm(memory_dir: Path, payload: dict[str, Any], reason: str) -> dict[str, Any]:
+    """Arme une confirmation de rituel pour la session concernée."""
+    armed_at = utc_now()
+    state = {
+        "version": 2,
+        "armed_at": armed_at,
+        "reason": reason,
+        "status": "awaiting_recap",
+        "required_fields": [field for field, _, _ in RITUAL_FIELDS],
+        "acknowledged_at": None,
+        "recap": None,
+    }
+    _write_state(memory_dir, payload, state)
     return state
 
 
-def _addresses_from_input(payload: dict[str, Any]) -> list[str]:
+def recap_from_input(payload: dict[str, Any]) -> dict[str, Any] | None:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
-        return []
-    address = tool_input.get("address")
-    addresses = tool_input.get("addresses")
-    result: list[str] = []
-    if isinstance(address, str):
-        result.append(address)
-    if isinstance(addresses, list):
-        result.extend(item for item in addresses if isinstance(item, str))
-    return result
+        return None
+    return tool_input
 
 
-def is_resume_read(payload: dict[str, Any]) -> bool:
-    tool_name = str(payload.get("tool_name", ""))
-    return (
-        tool_name.endswith("__aret_get_resume_protocol")
-        or tool_name.endswith("__aret_read")
-        or tool_name.endswith("__aret_read_batch")
-    )
+def validate_recap(recap: dict[str, Any]) -> dict[str, str]:
+    """Valide une attestation de reprise sans prétendre juger sa sémantique.
+
+    La validité factuelle du récapitulatif relève de l'agent ; le contrôle
+    déterministe garantit les six volets du rituel et des contenus non triviaux.
+    """
+    normalized: dict[str, str] = {}
+    failures: list[str] = []
+    for field, label, minimum in RITUAL_FIELDS:
+        value = recap.get(field)
+        text = value.strip() if isinstance(value, str) else ""
+        if len(text) < minimum:
+            failures.append(f"{label} ({minimum} caractères minimum)")
+        else:
+            normalized[field] = text[:4000]
+    if failures:
+        raise ValueError("Récapitulatif de reprise incomplet : " + "; ".join(failures))
+    return normalized
+
+
+def is_resume_acknowledgement(payload: dict[str, Any]) -> bool:
+    return str(payload.get("tool_name", "")).endswith("__aret_acknowledge_resume")
 
 
 def _tool_succeeded(payload: dict[str, Any]) -> bool:
-    """Refuse de lever le garde sur un échec MCP explicitement signalé."""
     response = payload.get("tool_response")
     if response is None:
         return True
@@ -107,64 +133,59 @@ def _tool_succeeded(payload: dict[str, Any]) -> bool:
     return True
 
 
-def mark_read(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+def acknowledge(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Lève la garde seulement après une attestation MCP complète et réussie."""
     state = load_state(memory_dir, payload)
-    if state is None or not is_resume_read(payload) or not _tool_succeeded(payload):
+    if state is None or not is_resume_acknowledgement(payload) or not _tool_succeeded(payload):
         return state
-    remaining = set(state.get("remaining_addresses", []))
-    for address in _addresses_from_input(payload):
-        remaining.discard(address)
-    state["remaining_addresses"] = sorted(remaining)
-    if not remaining:
-        state["completed_at"] = utc_now()
-    path = state_path(memory_dir, payload)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    recap = recap_from_input(payload)
+    if recap is None:
+        return state
+    try:
+        normalized = validate_recap(recap)
+    except ValueError:
+        return state
+    state["status"] = "acknowledged"
+    state["acknowledged_at"] = utc_now()
+    state["recap"] = normalized
+    _write_state(memory_dir, payload, state)
     return state
+
+
+def ritual_prompt() -> str:
+    fields = "; ".join(label for _, label, _ in RITUAL_FIELDS)
+    return (
+        "Le contexte de reprise a déjà été injecté depuis SQLite canonique : ne relisez pas les documents source. "
+        "Avant toute action de poursuite, produisez un récapitulatif fidèle couvrant : " + fields + ". "
+        "Puis appelez aret_acknowledge_resume avec les six champs correspondants."
+    )
 
 
 def decision(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     state = load_state(memory_dir, payload)
-    if state is None or not state.get("remaining_addresses"):
+    if state is None or state.get("acknowledged_at"):
         return None
-    if is_resume_read(payload):
+    if is_resume_acknowledgement(payload):
         return None
-    remaining = state["remaining_addresses"]
-    preview = ", ".join(remaining[:6])
-    suffix = " …" if len(remaining) > 6 else ""
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                "BARRIÈRE DE REPRISE ARET-MMU : lecture canonique obligatoire avant toute autre opération. "
-                f"Il reste {len(remaining)} adresse(s) à lire via aret_read/aret_read_batch : {preview}{suffix}"
-            ),
-            "additionalContext": (
-                "La reprise ARET est incomplète. Ne pas poursuivre le travail, ne pas utiliser Bash/Edit/Write et ne pas conclure. "
-                "Lire les adresses ARET restantes avec aret_read_batch, puis reprendre seulement lorsque la barrière est levée."
-            ),
+            "permissionDecisionReason": "BARRIÈRE DE REPRISE ARET-MMU : le récapitulatif rituel doit être confirmé avant toute action de poursuite.",
+            "additionalContext": ritual_prompt(),
         }
     }
 
 
 def stop_feedback(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Force une unique continuation de tour lorsque Claude tente de conclure sans reprise complète."""
+    """Force une unique continuation lorsque l'agent tente de conclure sans récapitulatif."""
     state = load_state(memory_dir, payload)
-    if state is None or not state.get("remaining_addresses") or payload.get("stop_hook_active") is True:
+    if state is None or state.get("acknowledged_at") or payload.get("stop_hook_active") is True:
         return None
-    remaining = state["remaining_addresses"]
-    preview = ", ".join(remaining[:6])
-    suffix = " …" if len(remaining) > 6 else ""
     return {
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": (
-                "BARRIÈRE DE REPRISE ARET-MMU ACTIVE : la reprise ne peut pas être considérée terminée. "
-                f"Lire les {len(remaining)} pages canoniques restantes avant de répondre ou poursuivre : {preview}{suffix}. "
-                "Obtenir les lots via aret_get_resume_protocol, puis appeler aret_read_batch pour chaque lot."
-            ),
+            "additionalContext": "BARRIÈRE DE REPRISE ARET-MMU ACTIVE : ne concluez pas et ne poursuivez pas encore. " + ritual_prompt(),
         }
     }
 

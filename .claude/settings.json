@@ -46,7 +46,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__aret-memory__aret_read.*",
+        "matcher": "mcp__aret-memory__aret_acknowledge_resume",
         "hooks": [
           {
             "type": "command",

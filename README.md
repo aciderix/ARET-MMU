@@ -40,7 +40,7 @@ Ne publiez jamais une vraie clé HMAC, un jeton GitHub, un fichier `.env` ou un 
 
 ## Configuration Claude Code
 
-Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. À chaque `SessionStart` ou `PostCompact`, le contexte injecte doctrine, Front, règles, dernières entrées du journal 71, audit, état Git et catalogue de pipelines. Claude doit ensuite appeler `aret_get_resume_protocol` et lire tous les lots via `aret_read_batch`. Tant que ces pages canoniques ne sont pas lues, les opérations hors lecture sont refusées et une tentative de fin reçoit une relance unique.
+Les hooks spécifiques à ARET-MMU sont fournis dans `.claude/`. Ils fonctionnent lorsque le dépôt est ouvert comme projet Claude Code. À chaque `SessionStart` ou `PostCompact`, le contexte injecte automatiquement depuis SQLite doctrine, Front, extraits des règles, roadmap, journal 71, audit, Git, assets, outils MCP et catalogue de pipelines. Les documents source étant déjà ingérés, Claude ne les relit pas par défaut. Il produit le récapitulatif rituel de ce contexte, puis appelle `aret_acknowledge_resume`. Tant que cette confirmation n’a pas réussi, les opérations de poursuite sont refusées et une tentative de fin reçoit une relance unique.
 
 La configuration du serveur MCP doit faire pointer Claude Code vers :
 
@@ -69,7 +69,7 @@ python3 tests/mcp_integration_check.py
 python3 -m compileall -q aret_mmu_server.py core evidence hooks migration ops cli
 ```
 
-La livraison validée contient **49 tests** et le contrôle stdio vérifie les **41 outils** attendus. La suite est exécutable dans le clone MCP isolé ; les tests qui requièrent explicitement un dépôt ARET source restent signalés `skipped` lorsque ce chemin n’est pas configuré.
+La livraison validée contient **49 tests** et le contrôle stdio vérifie les **42 outils** attendus. La suite est exécutable dans le clone MCP isolé ; les tests qui requièrent explicitement un dépôt ARET source restent signalés `skipped` lorsque ce chemin n’est pas configuré.
 
 Pour exécuter les tests qui nécessitent explicitement un dépôt ARET source, clonez ARET séparément et indiquez son chemin :
 

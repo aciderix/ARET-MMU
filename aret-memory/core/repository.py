@@ -407,7 +407,51 @@ class MemoryStore:
         return {
             "restore": self.restore(), "rules": rules, "latest_document_71_entries": journal,
             "recent_audit": audit,
-            "notice": "Les règles et entrées sont des pointeurs de reprise : utilisez READ/READ_BATCH pour leur contenu canonique intégral. Les commits Git sont fournis par le statut dépôt en lecture seule, jamais par SQLite.",
+            "notice": "Les règles et entrées sont des pointeurs de reprise issus de SQLite ; utilisez READ/READ_BATCH seulement lorsqu’un approfondissement ciblé est nécessaire. Les commits Git sont fournis par le statut dépôt en lecture seule, jamais par SQLite.",
+        }
+
+    def get_resume_context(self, journal_limit: int = 8, rule_limit: int = 12, excerpt_bytes: int = 480) -> dict[str, Any]:
+        """Construit le contexte automatique de reprise depuis SQLite, sans relecture de Markdown.
+
+        Le paquet contient des extraits déterministes des règles et du journal, le Front,
+        l’audit, la roadmap et les assets. Les bornes empêchent l’injection de masquer la
+        suite du contexte par une charge documentaire excessive.
+        """
+        if isinstance(excerpt_bytes, bool) or not isinstance(excerpt_bytes, int) or excerpt_bytes < 120 or excerpt_bytes > 1200:
+            raise AretError("excerpt_bytes doit être compris entre 120 et 1200")
+        brief = self.get_resume_brief(journal_limit=journal_limit, rule_limit=rule_limit, audit_limit=12)
+        rule_ids = [str(item["id"]) for item in brief["rules"]]
+        journal_ids = [str(item["id"]) for item in brief["latest_document_71_entries"]]
+        ids = list(dict.fromkeys(rule_ids + journal_ids))
+        content_by_id: dict[str, str] = {}
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            with self._read_connection() as conn:
+                rows = conn.execute(f"SELECT id,content FROM knowledge WHERE id IN ({placeholders})", ids).fetchall()
+            content_by_id = {str(row["id"]): str(row["content"]) for row in rows}
+
+        def enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            enriched: list[dict[str, Any]] = []
+            for item in items:
+                row = dict(item)
+                text = " ".join(content_by_id.get(str(row["id"]), "").split())
+                if len(text.encode("utf-8")) > excerpt_bytes:
+                    encoded = text.encode("utf-8")[:excerpt_bytes]
+                    text = encoded.decode("utf-8", errors="ignore").rstrip() + " …"
+                row["content_excerpt"] = text
+                enriched.append(row)
+            return enriched
+
+        roadmap = self.get_roadmap(max_items=16)
+        assets = self.get_assets(limit=12)["assets"]
+        return {
+            **brief["restore"],
+            "rules": enrich(brief["rules"]),
+            "latest_document_71_entries": enrich(brief["latest_document_71_entries"]),
+            "recent_audit": brief["recent_audit"],
+            "roadmap": roadmap,
+            "assets": assets,
+            "notice": "Paquet de reprise injecté depuis SQLite canonique ; aucun document source ne doit être relu avant le récapitulatif rituel.",
         }
 
     def get_resume_protocol(self, journal_limit: int = 8, batch_size: int = 20) -> dict[str, Any]:

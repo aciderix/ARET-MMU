@@ -1,41 +1,48 @@
-"""Hook PostCompact : réhydrate le Front canonique après compression de contexte."""
+"""Hook PostCompact : réinjecte le paquet SQLite de reprise et réarme le rituel."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from common import repository_context, run
-from resume_guard import arm
+from common import repository_context
+from evidence.adapters.pipelines import pipeline_catalog, toolchain_status
+from resume_guard import arm, ritual_prompt
 
 
 def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    boot = store.boot()
-    front = store.get_front()
-    protocol = store.get_resume_protocol()
-    guard = arm(store.memory_dir, payload, protocol["required_addresses"], reason="PostCompact")
-    protocol_summary = {
-        "protocol_version": protocol["protocol_version"], "required_address_count": protocol["required_address_count"],
-        "batch_count": protocol["batch_count"], "instructions": protocol["instructions"],
-    }
+    context = store.get_resume_context(journal_limit=8, rule_limit=12, excerpt_bytes=260)
+    guard = arm(store.memory_dir, payload, reason="PostCompact")
     checkpoint = None
     if store.write_enabled:
         checkpoint = store.record_session_checkpoint(
             "POST_COMPACT", payload.get("session_id"), payload.get("trigger"), payload.get("compact_summary"), "aret-hook-postcompact"
         )
+    catalog = pipeline_catalog()
     return {
-        "front": front,
-        "relevant_addresses": front["relevant_addresses"],
-        "doctrine": boot["doctrine"],
+        **context,
+        "relevant_addresses": context["front"]["relevant_addresses"],
         "git_context": repository_context(),
         "checkpoint": checkpoint,
-        "resume_protocol": protocol_summary,
         "resume_guard": {
-            "armed_at": guard["armed_at"], "reason": guard["reason"],
-            "remaining_address_count": len(guard["remaining_addresses"]),
+            "armed_at": guard["armed_at"],
+            "reason": guard["reason"],
+            "status": guard["status"],
+            "required_sections": guard["required_fields"],
         },
-        "notice": "PostCompact arme la barrière de reprise. PreToolUse refuse toute opération hors lecture MCP tant que les lots du protocole ne sont pas lus ; Stop relance l’agent une fois s’il tente de conclure trop tôt.",
+        "resume_ritual": {
+            "required": True,
+            "tool": "aret_acknowledge_resume",
+            "prompt": ritual_prompt(),
+        },
+        "pipeline_catalog": {policy: [item["name"] for item in items] for policy, items in catalog["policies"].items()},
+        "toolchain_status": toolchain_status(Path(__file__).resolve().parents[2]),
+        "recent_pipeline_runs": store.get_pipeline_runs(limit=8)["runs"],
+        "notice": "PostCompact a réinjecté le contexte SQLite et armé le récapitulatif rituel. Aucun document source n’est à relire par défaut ; produisez le récapitulatif puis confirmez-le avec aret_acknowledge_resume avant de poursuivre.",
     }
 
 
 if __name__ == "__main__":
+    from common import run
+
     run("PostCompact", handler)
