@@ -9,9 +9,10 @@ ARET-MMU est une façade MCP déterministe devant un **Memory Store SQLite** loc
 | Domaine | Contrat actuel |
 |---|---|
 | Transport | Stdio par défaut ; HTTP diffusible seulement sur lancement explicite avec `--streamable-http`. |
+| Bootstrap Cloud | `scripts/launch_aret_mcp.sh` crée le venv, synchronise les dépendances sur changement de `pyproject.toml` et journalise uniquement sur stderr avant `exec`. |
 | Répertoire mémoire | `.aret-memory/`, configurable avec `--memory-dir` ou `ARET_MEMORY_DIR`. |
 | Base canonique | `.aret-memory/aret_memory.sqlite`, en SQLite WAL avec clés étrangères actives. |
-| Écriture | Lecture seule par défaut ; `ARET_WRITE_ENABLED=true` ou `--write-enabled` est requis pour toute mutation. |
+| Écriture | Lecture seule par défaut ; `ARET_WRITE_ENABLED=true` ou `--write-enabled` est requis au démarrage pour toute mutation. |
 | Artefacts | Sous `.aret-memory/artifacts/`, hors SQLite, hashés et lus explicitement sous borne. |
 | Preuves | `PROVEN` exige une preuve liée, `PASS` et HMAC-admissible. |
 | Historique | Connaissances append-first ; aucune suppression générale ni réécriture de contenu via MCP. |
@@ -107,6 +108,7 @@ Le serveur déclare **43 outils métier**.
 | Pagination | Défaut : 20 objets / 65 536 octets ; plafond : 100 objets / 262 144 octets. |
 | WAL | Checkpoint `TRUNCATE` avant export de bundle et commit Git mémoire ; refus explicite si SQLite le signale occupé. |
 | Git | Fichiers WAL/SHM exclus par `.gitignore`; toute modification hors Memory Store refuse le commit mémoire. |
+| Démarrage Cloud | Le profil `.mcp.json` versionné pointe vers le lanceur et fixe `ARET_WRITE_ENABLED=false` ; l’écriture nécessite une configuration distincte et un redémarrage MCP. |
 
 ## Intégrations opérationnelles
 

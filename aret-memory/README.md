@@ -60,17 +60,16 @@ La dernière commande démarre le serveur en **stdio**. C’est le mode adapté 
 
 ## Connexion comme MCP local
 
-Le fichier de configuration suivant est un modèle. Remplacez les chemins par ceux de votre copie locale du projet et de son environnement virtuel. Le serveur est explicitement lancé en lecture seule ; cette configuration est le mode recommandé pour la première migration et les revues.
+Le fichier `.mcp.json` de projet lance `scripts/launch_aret_mcp.sh`. Ce lanceur crée idempotemment `aret-memory/.venv`, installe les dépendances déclarées par `pyproject.toml` si elles ne sont pas déjà synchronisées, puis remplace son processus par le serveur MCP. Toutes ses sorties techniques sont envoyées vers stderr ; stdout reste réservé au protocole stdio. Cette forme est adaptée aux conteneurs Claude Code éphémères comme aux postes locaux.
 
 ```json
 {
   "mcpServers": {
-    "ARET-MMU": {
-      "command": "/chemin/vers/aret-memory/.venv/bin/python",
+    "aret-memory": {
+      "command": "${CLAUDE_PROJECT_DIR}/aret-memory/scripts/launch_aret_mcp.sh",
       "args": [
-        "/chemin/vers/aret-memory/aret_mmu_server.py",
         "--memory-dir",
-        "/chemin/vers/aret-memory/.aret-memory"
+        "${CLAUDE_PROJECT_DIR}/aret-memory/.aret-memory"
       ],
       "env": {
         "ARET_WRITE_ENABLED": "false"
@@ -79,6 +78,8 @@ Le fichier de configuration suivant est un modèle. Remplacez les chemins par ce
   }
 }
 ```
+
+Le bootstrap Python automatique n’accorde aucun droit d’écriture. Sur un conteneur vierge, le premier démarrage nécessite un accès aux dépendances Python ou à leur cache ; les démarrages suivants réutilisent le venv tant que `pyproject.toml` n’a pas changé.
 
 Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` et `PostCompact`, les hooks injectent un **Resume Dossier V1.2** compact et contractuel : playbook stable à cinq domaines, fiches opérationnelles dérivées de méthode, gates et diagnostic ; handoff actif ; checkpoint technique ; cinq adresses chaudes au plus ; capacités/pipelines ; état Git ; et rituel. Le checkpoint est `NONE` lorsqu’aucun geste technique n’est réellement actif, ce qui interdit toute donnée inventée. Lorsqu’il est `ACTIVE`, il porte obligatoirement la cible, le dernier changement, l’état d’exécution, la dernière validation et les actions immédiates. Il ne relit ni n’injecte massivement les documents historiques. Produisez le récapitulatif rituel des six volets, puis appelez `aret_acknowledge_resume` avec l’empreinte `resume_contract_hash` affichée dans le dossier : les hooks refusent toute autre opération tant que cette confirmation du même contrat n’a pas réussi. Ne relisez les sources que pour un approfondissement ciblé sur une adresse. Utilisez ensuite `aret_find` pour obtenir une sélection de candidats et `aret_read` ou `aret_read_batch` pour lire les éléments dont les adresses ont été retenues. Un résultat de recherche ne doit jamais être traité comme une preuve.
 
@@ -105,14 +106,17 @@ Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` 
 
 ## Activation contrôlée des écritures
 
-N’activez les écritures qu’après avoir validé les parcours de lecture et la politique de preuves. L’activation est explicite et limitée au processus lancé.
+N’activez les écritures qu’après avoir validé les parcours de lecture et la politique de preuves. Le droit est lu au démarrage : une session MCP déjà connectée ne peut pas s’accorder elle-même ce privilège. Pour une session de travail, passez explicitement `ARET_WRITE_ENABLED` à `true` dans sa configuration MCP, puis redémarrez ou reconnectez le serveur et vérifiez `write_enabled: true` avec `aret_boot`.
 
-```bash
-export ARET_WRITE_ENABLED=true
-python aret_mmu_server.py --memory-dir "$(pwd)/.aret-memory" --write-enabled
+```json
+{
+  "env": {
+    "ARET_WRITE_ENABLED": "true"
+  }
+}
 ```
 
-Les outils `aret_register_component`, `aret_register_function`, `aret_register_brick`, `aret_append_knowledge`, `aret_update_front`, `aret_replace_front`, `aret_prepare_handoff`, `aret_rebuild_front`, `aret_record_proof`, `aret_attach_proof`, `aret_invalidate_proof`, `aret_add_relation` et `aret_rebuild_index` deviennent alors disponibles. Toute mutation se déroule dans une transaction SQLite et génère un événement d’audit. Il n’existe pas d’outil MCP de suppression ni de réécriture du contenu d’une connaissance.
+Le profil versionné reste à `false`. Le retour au mode lecture seule consiste à rétablir `false` puis redémarrer le serveur. Les outils `aret_register_component`, `aret_register_function`, `aret_register_brick`, `aret_append_knowledge`, `aret_update_front`, `aret_replace_front`, `aret_prepare_handoff`, `aret_rebuild_front`, `aret_record_proof`, `aret_attach_proof`, `aret_invalidate_proof`, `aret_add_relation` et `aret_rebuild_index` deviennent alors disponibles. Toute mutation se déroule dans une transaction SQLite et génère un événement d’audit. Il n’existe pas d’outil MCP de suppression ni de réécriture du contenu d’une connaissance.
 
 ### Preuves et statut `PROVEN`
 

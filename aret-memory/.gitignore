@@ -1,5 +1,6 @@
 # Environnements et secrets locaux
 .venv/
+*.egg-info/
 .env
 __pycache__/
 .pytest_cache/
