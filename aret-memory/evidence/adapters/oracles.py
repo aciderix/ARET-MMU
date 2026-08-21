@@ -63,11 +63,20 @@ def repository_revision(repository: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else "UNKNOWN"
 
 
+def _repository_file(repository: Path, relative_path: str, label: str) -> Path:
+    """Résout un fichier d’oracle et refuse toute sortie du dépôt configuré."""
+    root = repository.resolve()
+    candidate = (root / relative_path).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise AretError(f"{label} résolu hors du dépôt ARET configuré")
+    return candidate
+
+
 def required_tools(spec: OracleSpec, repository: Path) -> list[str]:
     missing = [tool for tool in spec.dependencies if shutil.which(tool) is None]
-    if spec.requires_aret_binary and not (repository / "target" / "release" / "aret").is_file():
+    if spec.requires_aret_binary and not _repository_file(repository, "target/release/aret", "Binaire ARET").is_file():
         missing.append("target/release/aret")
-    if spec.script and not (repository / spec.script).is_file():
+    if spec.script and not _repository_file(repository, spec.script, "Script d’oracle").is_file():
         missing.append(spec.script)
     return missing
 
@@ -151,7 +160,9 @@ def run_oracle(
     if not repository.is_dir():
         raise AretError("Dépôt ARET introuvable")
     missing = required_tools(spec, repository)
-    command = list(spec.command) if spec.command else ["bash", str((repository / str(spec.script)).resolve())]
+    script_path = _repository_file(repository, str(spec.script), "Script d’oracle") if spec.script else None
+    aret_binary = _repository_file(repository, "target/release/aret", "Binaire ARET")
+    command = list(spec.command) if spec.command else ["bash", str(script_path)]
     if fixture:
         command.append(fixture)
     started = utc_now()
@@ -161,7 +172,7 @@ def run_oracle(
     exit_code: int | None = None
     timed_out = False
     if not missing:
-        environment = {"PATH": os.environ.get("PATH", ""), "LC_ALL": "C", "TZ": "UTC", "ARET": str((repository / "target" / "release" / "aret").resolve())}
+        environment = {"PATH": os.environ.get("PATH", ""), "LC_ALL": "C", "TZ": "UTC", "ARET": str(aret_binary)}
         try:
             completed = subprocess.run(command, cwd=repository, env=environment, text=True, capture_output=True, timeout=limit, check=False)
             stdout, stderr, exit_code = completed.stdout, completed.stderr, completed.returncode

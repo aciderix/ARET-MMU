@@ -195,8 +195,17 @@ def _safe_token(value: Any, label: str) -> str:
     return candidate
 
 
+def _repository_file(repository: Path, relative_path: str, label: str) -> Path:
+    """Résout un exécutable de pipeline et refuse toute sortie du dépôt configuré."""
+    root = repository.resolve()
+    candidate = (root / relative_path).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise AretError(f"{label} résolu hors du dépôt ARET configuré")
+    return candidate
+
+
 def _required_tools(spec: PipelineSpec, repository: Path) -> list[str]:
-    binary = repository / "target" / "release" / "aret"
+    binary = _repository_file(repository, "target/release/aret", "Binaire ARET")
     missing: list[str] = []
     for tool in spec.dependencies:
         if tool == "aret":
@@ -237,7 +246,7 @@ def _safe_corpus_path(store: MemoryStore, repository: Path, value: str) -> Path:
 def _command_for(spec: PipelineSpec, store: MemoryStore, repository: Path, parameters: dict[str, Any], run_dir: Path) -> list[str] | None:
     """Construit uniquement des argv fermés depuis des paramètres validés."""
     runner = spec.runner
-    binary = str((repository / "target" / "release" / "aret").resolve())
+    binary = str(_repository_file(repository, "target/release/aret", "Binaire ARET"))
     if runner == "internal_toolchain":
         return None
     if runner in {"aret_imports", "aret_walls", "gensig"}:
@@ -255,10 +264,10 @@ def _command_for(spec: PipelineSpec, store: MemoryStore, repository: Path, param
         return command
     if runner == "wallsweep":
         corpus = _safe_corpus_path(store, repository, str(parameters.get("corpus_path", "")))
-        return ["bash", str(repository / "bench" / "wallsweep.sh"), str(corpus)]
+        return ["bash", str(_repository_file(repository, "bench/wallsweep.sh", "Script de pipeline")), str(corpus)]
     if runner == "corpus_sweep":
         corpus = _safe_corpus_path(store, repository, str(parameters.get("corpus_path", "")))
-        return ["bash", str(repository / "bench" / "corpus_sweep.sh"), str(corpus)]
+        return ["bash", str(_repository_file(repository, "bench/corpus_sweep.sh", "Script de pipeline")), str(corpus)]
     scripts = {
         "regression": "bench/regression.sh", "gauntlet": "bench/gauntlet/score.sh",
         "busybox_sweep": "bench/busybox_sweep.sh", "sqlite_sweep": "bench/sqlite_sweep.sh",
@@ -270,14 +279,14 @@ def _command_for(spec: PipelineSpec, store: MemoryStore, repository: Path, param
         "gauntlet_build": "bench/gauntlet/build.sh", "setup_winelib": "tools/setup-winelib.sh",
     }
     if runner in scripts:
-        path = repository / scripts[runner]
+        path = _repository_file(repository, scripts[runner], "Script de pipeline")
         prefix = ["python3"] if path.suffix == ".py" else ["bash"]
         return prefix + [str(path)]
     if runner == "wine_heavy_measure":
         source = _safe_asset_path(store, repository, str(parameters.get("source_path", "")))
         if source.suffix.lower() != ".c":
             raise AretError("source_path doit désigner un fichier C Wine local")
-        return ["python3", str(repository / "tools" / "gen_wine_heavy.py"), str(source)]
+        return ["python3", str(_repository_file(repository, "tools/gen_wine_heavy.py", "Script de pipeline")), str(source)]
     if runner == "wine_heavy_proof":
         profile = _safe_token(parameters.get("profile", "native"), "profile")
         scripts_by_profile = {
@@ -287,14 +296,14 @@ def _command_for(spec: PipelineSpec, store: MemoryStore, repository: Path, param
         }
         if profile not in scripts_by_profile:
             raise AretError("Profil wine_heavy inconnu : wine, native, ntreg, ntreg_native ou reg_native")
-        return ["bash", str(repository / scripts_by_profile[profile])]
+        return ["bash", str(_repository_file(repository, scripts_by_profile[profile], "Script de pipeline"))]
     if runner == "wallcorpus_fetch":
         profile = _safe_token(parameters.get("profile", "sample"), "profile")
         if profile not in PROFILE_PACKAGES:
             raise AretError("Profil corpus inconnu : sample, medium ou full")
         corpus_dir = store.artifacts_dir / "corpora" / f"wall-{profile}"
         corpus_dir.mkdir(parents=True, exist_ok=True)
-        return ["bash", str(repository / "bench" / "wallcorpus_fetch.sh"), str(corpus_dir), str(PROFILE_PACKAGES[profile])]
+        return ["bash", str(_repository_file(repository, "bench/wallcorpus_fetch.sh", "Script de pipeline")), str(corpus_dir), str(PROFILE_PACKAGES[profile])]
     if runner == "capture_snapshot":
         pid = parameters.get("pid")
         if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1:
@@ -304,7 +313,7 @@ def _command_for(spec: PipelineSpec, store: MemoryStore, repository: Path, param
         if lo < 0 or hi <= lo or hi > 0x1_0000_0000:
             raise AretError("Plage mémoire snapshot invalide")
         target = run_dir / f"snapshot-{pid}.aretsnp1"
-        return ["python3", str(repository / "tools" / "snapshot" / "dump_snapshot.py"), str(pid), str(target), hex(lo), hex(hi)]
+        return ["python3", str(_repository_file(repository, "tools/snapshot/dump_snapshot.py", "Script de pipeline")), str(pid), str(target), hex(lo), hex(hi)]
     raise AretError(f"Runner non implémenté : {runner}")
 
 
@@ -416,7 +425,7 @@ def run_pipeline(
         run_dir.mkdir(parents=True, exist_ok=True)
         environment = {
             "PATH": os.environ.get("PATH", ""), "LC_ALL": "C", "TZ": "UTC",
-            "ARET": str((repository / "target" / "release" / "aret").resolve()),
+            "ARET": str(_repository_file(repository, "target/release/aret", "Binaire ARET")),
             "ARET_MMU_PIPELINE_DIR": str(run_dir),
         }
         try:

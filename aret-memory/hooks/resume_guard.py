@@ -36,8 +36,17 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def session_identity(payload: dict[str, Any]) -> str | None:
+    """Retourne une identité de session explicite, ou None lorsqu’aucun scope n’est fourni."""
+    for field in ("session_id", "transcript_path", "cwd"):
+        value = str(payload.get(field) or "").strip()
+        if value:
+            return f"{field}:{value}"
+    return None
+
+
 def session_key(payload: dict[str, Any]) -> str:
-    raw = str(payload.get("session_id") or payload.get("transcript_path") or payload.get("cwd") or "default")
+    raw = session_identity(payload) or "unscoped"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -139,6 +148,8 @@ def _tool_succeeded(payload: dict[str, Any]) -> bool:
 def acknowledge(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     """Lève la garde seulement après une attestation MCP complète et réussie."""
     state = load_state(memory_dir, payload)
+    if session_identity(payload) is None:
+        return state
     if state is None or not is_resume_acknowledgement(payload) or not _tool_succeeded(payload):
         return state
     recap = recap_from_input(payload)
@@ -169,7 +180,17 @@ def ritual_prompt(resume_contract_hash: str) -> str:
 
 def decision(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     state = load_state(memory_dir, payload)
-    if state is None or state.get("acknowledged_at"):
+    if state is None:
+        return None
+    if session_identity(payload) is None:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "BARRIÈRE DE REPRISE ARET-MMU : identité de session absente ; reprise refusée fail-closed.",
+            }
+        }
+    if state.get("acknowledged_at"):
         return None
     if is_resume_acknowledgement(payload):
         return None

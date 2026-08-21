@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.repository import MemoryStore
-from hooks.resume_guard import acknowledge, arm, decision, stop_feedback, validate_recap
+from hooks.resume_guard import acknowledge, arm, decision, state_path, stop_feedback, validate_recap
 
 
 RESUME_HASH = "a" * 64
@@ -128,3 +128,40 @@ def test_resume_guard_keeps_barrier_for_an_incomplete_recap_and_stop_is_single_s
     assert feedback is not None
     assert "ne relisez pas les documents source" in feedback["hookSpecificOutput"]["additionalContext"]
     assert stop_feedback(memory_dir, {**session, "stop_hook_active": True}) is None
+
+
+def test_resume_guard_scopes_distinct_sessions_and_fallback_identities(tmp_path: Path) -> None:
+    memory_dir = tmp_path / "memory"
+    sessions = (
+        {"session_id": "session-a"},
+        {"session_id": "session-b"},
+        {"cwd": "/workspace/a"},
+        {"cwd": "/workspace/b"},
+    )
+    states = [arm(memory_dir, session, reason="SessionStart", resume_contract_hash=RESUME_HASH) for session in sessions]
+    assert all(state["status"] == "awaiting_recap" for state in states)
+
+    # Les quatre évènements utilisent des clés distinctes : aucun acquittement ne peut traverser leur scope.
+    state_files = {state_path(memory_dir, session) for session in sessions}
+    assert len(state_files) == len(sessions)
+    assert all(decision(memory_dir, {**session, "tool_name": "Bash"}) is not None for session in sessions)
+
+
+def test_resume_guard_without_any_identity_is_never_acknowledged_or_released(tmp_path: Path) -> None:
+    memory_dir = tmp_path / "memory"
+    unscoped: dict[str, str] = {}
+    arm(memory_dir, unscoped, reason="SessionStart", resume_contract_hash=RESUME_HASH)
+
+    completed = acknowledge(memory_dir, {
+        "tool_name": "mcp__aret-memory__aret_acknowledge_resume",
+        "tool_input": _recap(),
+        "tool_response": {"structuredContent": {"ok": True}},
+    })
+    assert completed is not None
+    assert completed["acknowledged_at"] is None
+    assert completed["status"] == "awaiting_recap"
+
+    blocked = decision(memory_dir, {"tool_name": "Bash", "tool_input": {}})
+    assert blocked is not None
+    assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "identité de session absente" in blocked["hookSpecificOutput"]["permissionDecisionReason"]

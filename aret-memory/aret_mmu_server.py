@@ -28,6 +28,21 @@ mcp = MCPServer(
 )
 
 
+def _configured_repository() -> Path:
+    """Résout une unique racine ARET dérivée du Store configuré."""
+    default = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
+    return default.resolve()
+
+
+def _configured_repository_path(repository_path: str | None) -> Path:
+    """Refuse toute racine de travail différente du dépôt ARET configuré."""
+    configured = _configured_repository()
+    candidate = Path(repository_path).expanduser().resolve() if repository_path else configured
+    if candidate != configured:
+        raise AretError("repository_path doit désigner le dépôt ARET configuré")
+    return configured
+
+
 def _call(operation: str, **kwargs: Any) -> dict[str, Any]:
     """Convertit toute erreur métier en résultat structuré, sans ambiguïté."""
     try:
@@ -360,8 +375,7 @@ def aret_run_oracle(
 ) -> dict[str, Any]:
     """Exécute difftest, winehash, winediff ou funcdiff via une liste fermée, puis enregistre son artefact et sa preuve."""
     try:
-        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
-        repository = Path(repository_path).expanduser().resolve() if repository_path else default_repository
+        repository = _configured_repository_path(repository_path)
         return {"ok": True, "operation": "run_oracle", "result": run_oracle(
             store, repository, oracle, knowledge_id, promote, fixture, timeout_seconds, actor,
         )}
@@ -381,10 +395,7 @@ def aret_get_pipeline_catalog() -> dict[str, Any]:
 def aret_get_toolchain_status(repository_path: str | None = None) -> dict[str, Any]:
     """Diagnostique les prérequis Wine, MinGW, Rust, Unicorn, Clang, Z3 et le binaire ARET sans mutation."""
     try:
-        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
-        repository = Path(repository_path).expanduser().resolve() if repository_path else default_repository
-        if repository != default_repository.resolve():
-            raise AretError("repository_path doit désigner le dépôt ARET configuré")
+        repository = _configured_repository_path(repository_path)
         return {"ok": True, "operation": "get_toolchain_status", "result": toolchain_status(repository)}
     except AretError as exc:
         return {"ok": False, "operation": "get_toolchain_status", "error": {"code": type(exc).__name__, "message": str(exc)}}
@@ -400,10 +411,7 @@ def aret_run_pipeline(
 ) -> dict[str, Any]:
     """Exécute un pipeline ARET de liste fermée ; dry_run est la valeur sûre par défaut et aucune commande libre n’est admise."""
     try:
-        default_repository = store.memory_dir.parents[1] if store.memory_dir.parent.name == "aret-memory" else Path.cwd()
-        repository = Path(repository_path).expanduser().resolve() if repository_path else default_repository
-        if repository != default_repository.resolve():
-            raise AretError("repository_path doit désigner le dépôt ARET configuré")
+        repository = _configured_repository_path(repository_path)
         result = run_pipeline(
             store, repository, pipeline, parameters, dry_run=dry_run, confirm_apply=confirm_apply,
             confirm_network=confirm_network, confirm_sensitive=confirm_sensitive,
