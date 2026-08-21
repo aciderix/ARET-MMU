@@ -204,6 +204,7 @@ def additional_context(result: dict[str, Any]) -> str:
             ]
             lines.append("Toolchain observée : " + " ; ".join(states[:16]))
     lines.extend(_observation_lines(dossier))
+    lines.append("GOUVERNANCE V1.4 : si une capacité ARET existe dans le catalogue MCP, utilisez-la plutôt qu’un équivalent shell. Le shell reste un laboratoire ; ses sorties ne sont ni faits canoniques ni preuves. Tout outil réutilisable ou contribuant de façon récurrente à une décision, validation, preuve, corpus, asset ou priorisation doit être industrialisé dans le MCP avant d’être déclaré capacité officielle.")
     lines.append("Outils MCP par capacité : " + _compact_tool_groups())
 
     git = result.get("git_context", {})

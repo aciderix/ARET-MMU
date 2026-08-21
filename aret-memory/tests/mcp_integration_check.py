@@ -57,6 +57,38 @@ async def main() -> None:
             result = response.structured_content["result"]
             if result["server"] != "ARET-MMU" or result["write_enabled"] is not False:
                 raise AssertionError(f"Bootstrap incohérent : {result}")
+
+            # V1.4 : une capacité ARET cataloguée est sélectionnée via MCP avant toute
+            # commande locale équivalente. Les trois plans restent en dry_run, donc sans mutation.
+            catalog_response = await session.call_tool("aret_get_pipeline_catalog", {})
+            catalog_payload = catalog_response.structured_content
+            if not catalog_payload or catalog_payload.get("ok") is not True:
+                raise AssertionError(f"Catalogue MCP inattendu : {catalog_response}")
+            catalog = catalog_payload["result"]
+            catalog_names = {
+                item["name"]
+                for entries in catalog.get("policies", {}).values()
+                for item in entries
+                if isinstance(item, dict) and "name" in item
+            }
+            required_governance_pipelines = {"run_relay_diff", "run_magicdiv_check", "run_regression_gate"}
+            if required_governance_pipelines - catalog_names:
+                raise AssertionError("Catalogue V1.4 incomplet pour les capacités ARET réutilisables")
+            toolchain_response = await session.call_tool("aret_get_toolchain_status", {})
+            toolchain_payload = toolchain_response.structured_content
+            if not toolchain_payload or toolchain_payload.get("ok") is not True:
+                raise AssertionError(f"Toolchain MCP inattendue : {toolchain_response}")
+            for pipeline in sorted(required_governance_pipelines):
+                plan_response = await session.call_tool("aret_run_pipeline", {
+                    "pipeline": pipeline, "parameters": {}, "dry_run": True,
+                    "confirm_apply": False, "confirm_network": False, "confirm_sensitive": False,
+                })
+                plan_payload = plan_response.structured_content
+                if not plan_payload or plan_payload.get("ok") is not True:
+                    raise AssertionError(f"Plan MCP V1.4 inattendu pour {pipeline} : {plan_response}")
+                plan = plan_payload["result"]
+                if plan.get("pipeline") != pipeline or plan.get("dry_run") is not True:
+                    raise AssertionError(f"Plan V1.4 invalide pour {pipeline} : {plan}")
             acknowledgement = await session.call_tool("aret_acknowledge_resume", {
                 "working_rules": "Les règles imposent FIND puis READ, des verdicts honnêtes et une preuve PASS admissible pour PROVEN.",
                 "current_state": "Le Front et la roadmap déterminent l’état actif, les bloqueurs et l’objectif opérationnel à poursuivre.",

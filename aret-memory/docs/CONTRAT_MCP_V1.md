@@ -94,6 +94,7 @@ Le serveur déclare **43 outils métier**.
 | Roadmap | Les briques possèdent `milestone`, `target_platform` et `priority` (1–5) ; la vue roadmap reste dérivée de SQLite. |
 | Front | La clé `brick` ne peut référencer qu’une brique `ACTIVE`, jamais une brique seulement planifiée. |
 | Resume Dossier V1.3 | Cinq domaines `CORE_PLAYBOOK` obligatoires, fiches opérationnelles dérivées compactes, handoff Front atomique, checkpoint déclaratif conditionnel et fenêtre d’observations factuelles, sans table supplémentaire. |
+| Gouvernance V1.4 | Si une capacité ARET est cataloguée, MCP est prioritaire ; le shell reste laboratoire non canonique. Un outil réutilisable ou décisionnel est industrialisé avant de devenir capacité officielle. |
 | Checkpoint technique | `NONE` impose les cinq champs vides et déclare qu’aucun geste ne doit être inventé ; `ACTIVE` exige cible, changement, état, dernière validation et actions immédiates, chacun sous borne. |
 | Cohérence du geste | `aret_prepare_handoff` écrit `last_action` avec le checkpoint actif, ou une absence explicite avec `NONE`, dans la même transaction. |
 | Fraîcheur de reprise | `handoff_front_hash` couvre le checkpoint et doit égaler le Front courant ; une divergence rend le dossier `STALE` et bloque l’injection. |
@@ -109,6 +110,12 @@ Le serveur déclare **43 outils métier**.
 | WAL | Checkpoint `TRUNCATE` avant export de bundle et commit Git mémoire ; refus explicite si SQLite le signale occupé. |
 | Git | Fichiers WAL/SHM exclus par `.gitignore`; toute modification hors Memory Store refuse le commit mémoire. |
 | Démarrage Cloud | Le profil `.mcp.json` versionné pointe vers le lanceur et fixe `ARET_WRITE_ENABLED=false` ; l’écriture nécessite une configuration distincte et un redémarrage MCP. |
+
+## Gouvernance opérationnelle V1.4
+
+Le catalogue fermé distingue une capacité ARET officielle d’un script d’exploration. Lorsqu’un oracle, un différentiel Wine, un wall, un corpus, un asset ou un pipeline existe dans le MCP, le client doit consulter ce catalogue, vérifier la toolchain et utiliser la primitive MCP avec son `dry_run` et ses confirmations applicables. Une commande shell locale reste permise pour compiler, explorer, déboguer ou prototyper, mais sa sortie ne constitue jamais implicitement un fait CANONIQUE, une preuve ou une observation V1.3.
+
+L’industrialisation MCP devient obligatoire lorsqu’un outil devient réutilisable ou contribue de manière récurrente à une décision, une validation, une preuve, un corpus, un asset ou une priorisation ARET. Elle ne s’applique pas au premier prototype et ne crée ni nouvel outil de barrière, ni table, ni accès shell arbitraire. La capacité officielle doit être cataloguée, bornée, couverte par sa politique, testée et documentée ; un artefact/résultat adressable est requis lorsqu’elle produit un fait durable.
 
 ## Intégrations opérationnelles
 

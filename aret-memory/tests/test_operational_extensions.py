@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from core.repository import AretError, MemoryStore
+from core.repository import AretError, MemoryStore, utc_now
 from ops.git_memory import GitMemoryError, commit, status
 
 
@@ -67,6 +68,20 @@ def populated_store(memory_dir: Path) -> MemoryStore:
     return store
 
 
+def _record_governance_pipeline(store: MemoryStore, index: int) -> dict[str, object]:
+    relative = f"governance/run_{index}.json"
+    artifact = store.artifacts_dir / relative
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(json.dumps({"index": index, "kind": "governance"}) + "\n", encoding="utf-8")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    return store.record_pipeline_run(
+        pipeline_name="run_magicdiv_check", kind="GOVERNANCE_TEST", policy="READ_ONLY", result="PASS",
+        command="closed:run_magicdiv_check", parameters={"index": index, "mode": "governance"},
+        artifact_path=relative, artifact_hash=digest, exit_code=0,
+        started_at=utc_now(), finished_at=utc_now(), actor="governance-test",
+    )
+
+
 def test_hooks_are_read_only_and_return_structured_context(tmp_path: Path) -> None:
     memory_dir = tmp_path / "source"
     populated_store(memory_dir)
@@ -82,6 +97,22 @@ def test_hooks_are_read_only_and_return_structured_context(tmp_path: Path) -> No
     assert started["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert resumed["hookSpecificOutput"]["hookEventName"] == "PostCompact"
     assert "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE" in resumed["hookSpecificOutput"]["additionalContext"]
+
+
+def test_v14_governance_is_injected_with_three_persisted_observations_under_budget(tmp_path: Path) -> None:
+    memory_dir = tmp_path / "governance"
+    store = populated_store(memory_dir)
+    runs = [_record_governance_pipeline(store, index) for index in range(3)]
+    resumed = run_hook("post_compact.py", memory_dir)
+    dossier = resumed["result"]["resume_dossier"]
+    context = resumed["hookSpecificOutput"]["additionalContext"]
+    assert dossier["observations"]["total"] == 3
+    assert len(dossier["observations"]["items"]) == 3
+    assert runs[-1]["address"] in context
+    assert "GOUVERNANCE V1.4" in context
+    assert "catalogue MCP" in context
+    assert "Le shell reste un laboratoire" in context
+    assert len(context.encode("utf-8")) <= 18_500
 
 
 def test_git_memory_commit_is_explicit_and_scope_limited(tmp_path: Path) -> None:
