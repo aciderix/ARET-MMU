@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "aret-memory": {
+      "command": "${CLAUDE_PROJECT_DIR}/aret-memory/scripts/launch_aret_mcp.sh",
+      "args": [
+        "--memory-dir",
+        "${CLAUDE_PROJECT_DIR}/aret-memory/.aret-memory"
+      ],
+      "env": {
+        "ARET_WRITE_ENABLED": "false"
+      }
+    }
+  }
+}
