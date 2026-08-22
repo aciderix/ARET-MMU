@@ -5,15 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from common import repository_context, run
+from common import repository_context, resume_context_or_degraded, run
 from evidence.adapters.pipelines import pipeline_catalog, toolchain_status
 from resume_guard import arm, ritual_prompt
 
 
 def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    context = store.get_resume_context(journal_limit=8, rule_limit=12, excerpt_bytes=260)
+    # Ne lève jamais : une mémoire incomplète produit un contexte DÉGRADÉ, et la
+    # barrière est armée dans TOUS les cas (le fail-open silencieux est éliminé).
+    context, degraded = resume_context_or_degraded(store)
     dossier_hash = context["resume_dossier"]["contract_hash"]
-    guard = arm(store.memory_dir, payload, reason="SessionStart", resume_contract_hash=dossier_hash)
+    # Dégradé ⇒ armement SOFT (fail-loud, sans blocage dur) ; prêt ⇒ armement HARD.
+    guard = arm(store.memory_dir, payload, reason="SessionStart", resume_contract_hash=dossier_hash, ready=not degraded)
     catalog = pipeline_catalog()
     pipeline_summary = {
         policy: [item["name"] for item in items]
@@ -21,6 +24,7 @@ def handler(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
     }
     return {
         **context,
+        "degraded": degraded,
         "git_context": repository_context(),
         "resume_guard": {
             "armed_at": guard["armed_at"],

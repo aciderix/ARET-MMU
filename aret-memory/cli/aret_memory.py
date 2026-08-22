@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("rebuild-index", help="Reconstruire FTS5 depuis les tables canoniques")
     audit = commands.add_parser("audit", help="Afficher les derniers événements d’audit")
     audit.add_argument("--limit", type=int, default=100)
+    commands.add_parser("doctor", help="Vérifier la cohérence INTERNE de la mémoire (porte permanente ; exit≠0 si malsain)")
     return parser
 
 
@@ -97,6 +98,10 @@ def main() -> None:
             result = store.rebuild_index()
         elif args.command == "audit":
             result = store.audit_events(args.limit)
+        elif args.command == "doctor":
+            result = store.health_report()
+            emit(result)
+            raise SystemExit(0 if result["ok"] else 1)
         else:  # pragma: no cover
             parser.error(f"Commande inconnue : {args.command}")
             return

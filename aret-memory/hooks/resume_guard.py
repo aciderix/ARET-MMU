@@ -32,6 +32,20 @@ RITUAL_FIELDS: tuple[tuple[str, str, int], ...] = (
 )
 
 
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def barrier_disabled() -> bool:
+    """Kill-switch d'exploitation : une voie de sortie TOUJOURS disponible.
+
+    Une barrière ne doit jamais pouvoir s'armer sans issue. Même en mode dur,
+    si l'acquittement MCP est inatteignable (serveur non connecté), l'opérateur
+    doit pouvoir lever la garde sans éditer de code : `ARET_MMU_BARRIER_OFF=1`.
+    Vaut pour PreToolUse comme pour Stop.
+    """
+    return os.environ.get("ARET_MMU_BARRIER_OFF", "").strip().lower() in _TRUTHY
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -80,8 +94,17 @@ def _write_state(memory_dir: Path, payload: dict[str, Any], state: dict[str, Any
     temporary.replace(path)
 
 
-def arm(memory_dir: Path, payload: dict[str, Any], reason: str, resume_contract_hash: str) -> dict[str, Any]:
-    """Arme une confirmation liée à l’empreinte du dossier réellement injecté."""
+def arm(memory_dir: Path, payload: dict[str, Any], reason: str, resume_contract_hash: str, ready: bool = True) -> dict[str, Any]:
+    """Arme une confirmation liée à l’empreinte du dossier réellement injecté.
+
+    `ready` distingue deux modes, et c'est la leçon du deadlock vécu :
+      - mode "hard" (dossier prêt) : le PreToolUse refuse toute action jusqu'à
+        l'acquittement rituel — l'acquittement est alors sémantiquement possible.
+      - mode "soft" (dossier DÉGRADÉ / non prêt) : la barrière reste ARMÉE et le
+        contexte bruyant est injecté (fail-loud préservé), mais le PreToolUse NE
+        BLOQUE PAS dur. Sur une mémoire cassée, imposer un rituel rigide sans
+        voie de sortie fiable = deadlock. On avertit fort, on ne verrouille pas.
+    """
     if len(resume_contract_hash) != 64 or any(char not in "0123456789abcdef" for char in resume_contract_hash):
         raise ValueError("Empreinte Resume Dossier invalide : hash SHA-256 hexadécimal requis")
     armed_at = utc_now()
@@ -90,6 +113,7 @@ def arm(memory_dir: Path, payload: dict[str, Any], reason: str, resume_contract_
         "armed_at": armed_at,
         "reason": reason,
         "status": "awaiting_recap",
+        "mode": "hard" if ready else "soft",
         "required_fields": [field for field, _, _ in RITUAL_FIELDS],
         "resume_contract_hash": resume_contract_hash,
         "acknowledged_at": None,
@@ -179,8 +203,15 @@ def ritual_prompt(resume_contract_hash: str) -> str:
 
 
 def decision(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    if barrier_disabled():
+        return None
     state = load_state(memory_dir, payload)
     if state is None:
+        return None
+    if state.get("mode") == "soft":
+        # Reprise DÉGRADÉE : le contexte bruyant a déjà été injecté à l'armement
+        # (SessionStart/PostCompact) et le nudge Stop reste actif ; on n'impose
+        # PAS de blocage dur sans voie de sortie fiable — c'est ce qui a deadlocké.
         return None
     if session_identity(payload) is None:
         return {
@@ -205,7 +236,14 @@ def decision(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None
 
 
 def stop_feedback(memory_dir: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Force une unique continuation lorsque l'agent tente de conclure sans récapitulatif."""
+    """Force une unique continuation lorsque l'agent tente de conclure sans récapitulatif.
+
+    Actif en mode dur ET en mode soft (dégradé) : le nudge est informatif et
+    borné à une seule passe (stop_hook_active) — il avertit sans jamais bloquer.
+    Le kill-switch d'exploitation le désarme aussi.
+    """
+    if barrier_disabled():
+        return None
     state = load_state(memory_dir, payload)
     if state is None or state.get("acknowledged_at") or payload.get("stop_hook_active") is True:
         return None

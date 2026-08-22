@@ -147,6 +147,69 @@ def test_resume_guard_scopes_distinct_sessions_and_fallback_identities(tmp_path:
     assert all(decision(memory_dir, {**session, "tool_name": "Bash"}) is not None for session in sessions)
 
 
+def test_degraded_barrier_is_soft_and_never_hard_blocks(tmp_path: Path) -> None:
+    """Reproduction du deadlock : mémoire DÉGRADÉE (non prête) armée en mode soft.
+
+    La barrière est bien ARMÉE (fail-loud : état présent + nudge Stop actif), mais
+    PreToolUse ne doit JAMAIS refuser une action — sinon, sans acquittement MCP
+    atteignable, la session est verrouillée (vécu en live)."""
+    memory_dir = tmp_path / "memory"
+    session = {"session_id": "test-degraded"}
+    armed = arm(memory_dir, session, reason="SessionStart", resume_contract_hash=RESUME_HASH, ready=False)
+    assert armed["mode"] == "soft"
+    assert armed["status"] == "awaiting_recap"  # fail-loud : la barrière EST armée
+
+    # Aucune action n'est bloquée en mode dégradé, y compris sans acquittement.
+    assert decision(memory_dir, {**session, "tool_name": "Bash", "tool_input": {"command": "true"}}) is None
+    assert decision(memory_dir, {**session, "tool_name": "Edit", "tool_input": {}}) is None
+
+    # Mais le nudge Stop reste actif une passe : on avertit fort sans jamais verrouiller.
+    feedback = stop_feedback(memory_dir, session)
+    assert feedback is not None
+    assert "ne relisez pas les documents source" in feedback["hookSpecificOutput"]["additionalContext"]
+    assert stop_feedback(memory_dir, {**session, "stop_hook_active": True}) is None
+
+
+def test_ready_barrier_is_hard_and_blocks_until_acknowledged(tmp_path: Path) -> None:
+    """Dossier prêt ⇒ mode dur : le blocage rituel reste imposé (acquittement possible)."""
+    memory_dir = tmp_path / "memory"
+    session = {"session_id": "test-ready"}
+    armed = arm(memory_dir, session, reason="SessionStart", resume_contract_hash=RESUME_HASH, ready=True)
+    assert armed["mode"] == "hard"
+
+    blocked = decision(memory_dir, {**session, "tool_name": "Bash", "tool_input": {"command": "true"}})
+    assert blocked is not None
+    assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    acknowledge(memory_dir, {
+        **session,
+        "tool_name": "mcp__aret-memory__aret_acknowledge_resume",
+        "tool_input": _recap(),
+        "tool_response": {"structuredContent": {"ok": True}},
+    })
+    assert decision(memory_dir, {**session, "tool_name": "Edit", "tool_input": {}}) is None
+
+
+def test_env_kill_switch_releases_even_a_hard_barrier(tmp_path, monkeypatch) -> None:
+    """Voie de sortie d'exploitation toujours disponible : `ARET_MMU_BARRIER_OFF`.
+
+    Même en mode dur non acquitté (ex. serveur MCP non connecté), l'opérateur peut
+    lever PreToolUse et Stop sans éditer de code."""
+    memory_dir = tmp_path / "memory"
+    session = {"session_id": "test-killswitch"}
+    arm(memory_dir, session, reason="SessionStart", resume_contract_hash=RESUME_HASH, ready=True)
+
+    monkeypatch.delenv("ARET_MMU_BARRIER_OFF", raising=False)
+    assert decision(memory_dir, {**session, "tool_name": "Bash"}) is not None  # dur : bloque
+
+    monkeypatch.setenv("ARET_MMU_BARRIER_OFF", "1")
+    assert decision(memory_dir, {**session, "tool_name": "Bash"}) is None       # levé
+    assert stop_feedback(memory_dir, session) is None
+
+    monkeypatch.setenv("ARET_MMU_BARRIER_OFF", "0")
+    assert decision(memory_dir, {**session, "tool_name": "Bash"}) is not None    # rétabli
+
+
 def test_resume_guard_without_any_identity_is_never_acknowledged_or_released(tmp_path: Path) -> None:
     memory_dir = tmp_path / "memory"
     unscoped: dict[str, str] = {}

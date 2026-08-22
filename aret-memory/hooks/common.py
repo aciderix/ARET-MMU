@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -141,12 +142,87 @@ def _observation_lines(dossier: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _catastrophic_dossier(exc: Exception) -> dict[str, Any]:
+    """Dossier minimal non-prêt quand SQLite lui-même est illisible : jamais silencieux."""
+    reason = f"Dossier de reprise illisible : {exc}"
+    return {
+        "ready": False,
+        "errors": [reason],
+        "playbook": {"entries": []},
+        "handoff": {},
+        "front": {},
+        "observations": {"total": 0, "items": []},
+        "contract_hash": hashlib.sha256(("DEGRADED:" + reason).encode("utf-8")).hexdigest(),
+    }
+
+
+def resume_context_or_degraded(store: MemoryStore) -> tuple[dict[str, Any], bool]:
+    """Retourne (contexte, degraded). Ne lève JAMAIS : une mémoire incomplète ou
+    illisible produit un contexte DÉGRADÉ (avec un contract_hash valide pour armer la
+    barrière), au lieu de faire échouer le hook en silence — l'armement fail-open était
+    le seul cas où une reprise cassée laissait l'agent poursuivre sans garde."""
+    try:
+        return store.get_resume_context(journal_limit=8, rule_limit=12, excerpt_bytes=260), False
+    except AretError as exc:
+        try:
+            dossier = store.get_resume_dossier()
+        except Exception as inner:  # SQLite illisible, playbook corrompu, etc.
+            dossier = _catastrophic_dossier(inner)
+        try:
+            front = store.get_front()
+        except Exception:
+            front = {"state": {}, "relevant_addresses": []}
+        context = {
+            "resume_dossier": dossier,
+            "front": front,
+            "degraded_reason": str(exc),
+            "doctrine": "", "roadmap": {}, "assets": [], "recent_audit": [],
+            "memory_format_version": "", "policy_version": "",
+            "notice": "MÉMOIRE DE REPRISE DÉGRADÉE : le dossier n'est pas complet ; ne poursuivez pas comme si la reprise était normale.",
+        }
+        return context, True
+
+
+def _degraded_additional_context(dossier: dict[str, Any]) -> str:
+    """Contexte injecté quand le dossier n'est PAS prêt : bruyant, les lois restent
+    autoritatives, la barrière est active. Jamais une reprise silencieusement absente."""
+    entries = dossier.get("playbook", {}).get("entries", []) if isinstance(dossier.get("playbook"), dict) else []
+    lines = [
+        "# ⚠️ ARET-MMU — REPRISE DÉGRADÉE : MÉMOIRE DE REPRISE INCOMPLÈTE",
+        "Le dossier de reprise n'a PAS pu être construit complètement. NE POURSUIVEZ PAS comme si la reprise était normale : la barrière est active et la mémoire vivante est incomplète.",
+        "\n## CE QUI MANQUE",
+        *[f"- {item}" for item in dossier.get("errors", [])[:12]],
+        "\n## LOIS STABLES (playbook — toujours autoritatives)" if entries else "\n## LOIS STABLES INDISPONIBLES — vérifier config/playbook.md",
+    ]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        domains = ", ".join(str(d) for d in entry.get("domains", []))
+        lines.append(f"\n### {entry.get('title', '?')} [{domains}]")
+        lines.append(str(entry.get("content", "")).strip())
+    lines.extend([
+        "\n## À FAIRE AVANT TOUTE AUTRE ACTION",
+        "1. RÉPARER la mémoire (préparer un handoff via aret_prepare_handoff ; vérifier que config/playbook.md est présent et complet), OU",
+        "2. reconnaître explicitement cet état dégradé pour poursuivre la réparation.",
+        "\n## RITUEL DE CONFIRMATION OBLIGATOIRE",
+        "RITUEL OBLIGATOIRE AVANT TOUTE POURSUITE : " + ritual_prompt(str(dossier.get("contract_hash", ""))),
+        "Produisez le récapitulatif (les six volets — décrivez l'état DÉGRADÉ dans current_state) puis appelez aret_acknowledge_resume avec resume_contract_hash. La barrière PreToolUse refuse toute autre action jusque-là.",
+    ])
+    context = "\n".join(line for line in lines if line).strip()
+    encoded = context.encode("utf-8")
+    if len(encoded) > HOOK_CONTEXT_MAX_BYTES:
+        context = encoded[:HOOK_CONTEXT_MAX_BYTES].decode("utf-8", "ignore")
+    return context
+
+
 def additional_context(result: dict[str, Any]) -> str:
-    """Produit le dossier de reprise contractuel sans extrait arbitraire ni relecture Markdown."""
+    """Produit le dossier de reprise contractuel sans extrait arbitraire ni relecture Markdown.
+
+    Quand le dossier n'est pas prêt, retourne un contexte DÉGRADÉ bruyant plutôt que de
+    lever : le hook doit toujours injecter quelque chose et la barrière reste armée."""
     dossier = result.get("resume_dossier")
     if not isinstance(dossier, dict) or not dossier.get("ready"):
-        errors = dossier.get("errors", []) if isinstance(dossier, dict) else []
-        raise AretError("Resume Dossier non injectable : " + "; ".join(str(item) for item in errors))
+        return _degraded_additional_context(dossier if isinstance(dossier, dict) else {"errors": ["resume_dossier absent"]})
     playbook = dossier.get("playbook", {})
     entries = playbook.get("entries", []) if isinstance(playbook, dict) else []
     handoff = dossier.get("handoff", {}) if isinstance(dossier.get("handoff"), dict) else {}
