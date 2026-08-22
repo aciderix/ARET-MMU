@@ -104,6 +104,61 @@ Après connexion, appelez `aret_boot`, puis `aret_get_front`. À `SessionStart` 
 | `aret_get_pipeline_catalog` / `aret_run_pipeline` | Exposent uniquement des pipelines nommés et fermés, avec plan `dry_run`, confirmations explicites et artefacts hashés. |
 | `aret_get_assets` / `aret_register_asset` | Inventorient et importent les corpus et artefacts admis, sans chemin arbitraire. |
 
+## Activation des hooks (barrière de reprise)
+
+Le serveur MCP fournit les outils ; la **barrière de reprise** est portée par des hooks Claude Code déclarés dans le `.claude/settings.json` du dépôt. Leur activation est une étape d’installation explicite : à `SessionStart` et `PostCompact`, un hook injecte le Resume Dossier et arme la barrière ; à `PreToolUse`/`Stop`, la barrière exige le récapitulatif rituel ; à `PostToolUse` sur `aret_acknowledge_resume`, elle est levée.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-session-start.sh", "timeout": 10 }] }],
+    "PreCompact":   [{ "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-pre-compact.sh",  "timeout": 10 }] }],
+    "PostCompact":  [{ "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-post-compact.sh", "timeout": 10 }] }],
+    "PreToolUse":   [{ "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-resume-pre-tool.sh", "timeout": 5 }] }],
+    "Stop":         [{ "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-resume-stop.sh", "timeout": 5 }] }],
+    "PostToolUse":  [{ "matcher": "mcp__aret-memory__aret_acknowledge_resume", "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/aret-mmu-resume-post-tool.sh", "timeout": 5 }] }]
+  }
+}
+```
+
+Les entrypoints hooks (`hooks/*.py`) n’utilisent que la bibliothèque standard et des modules locaux : **aucun paquet tiers, aucun venv, aucun réseau** n’est requis pour qu’ils tournent. Il suffit de rendre le paquet importable. C’est essentiel en **session web/cloud** : dans un conteneur frais, le venv n’existe pas encore quand `SessionStart` se déclenche, donc un wrapper qui lance `python3` sans exposer le chemin du paquet échoue en silence (contexte non injecté, barrière non armée). Chaque wrapper source un helper commun qui exporte `PYTHONPATH` et préfère le venv s’il existe :
+
+```bash
+# .claude/hooks/aret-mmu-env.sh — à sourcer par chaque wrapper.
+aret_mmu_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}/aret-memory"
+export ARET_MEMORY_DIR="${ARET_MEMORY_DIR:-${aret_mmu_dir}/.aret-memory}"
+export PYTHONPATH="${aret_mmu_dir}${PYTHONPATH:+:${PYTHONPATH}}"   # import sans installation
+if [ -x "${aret_mmu_dir}/.venv/bin/python" ]; then aret_mmu_python="${aret_mmu_dir}/.venv/bin/python"; else aret_mmu_python="python3"; fi
+aret_mmu_exec() { exec "${aret_mmu_python}" "${aret_mmu_dir}/hooks/$1"; }
+```
+
+```bash
+# .claude/hooks/aret-mmu-session-start.sh (les cinq autres wrappers sont identiques, à l'entrypoint près)
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/aret-mmu-env.sh"
+aret_mmu_exec session_start.py
+```
+
+### Session web/cloud (Claude Code on the web)
+
+Le `.mcp.json` de projet et les hooks de `.claude/settings.json` **sont chargés en session cloud** car ils font partie du clone du dépôt — rien à installer côté client. Deux réglages d’environnement conditionnent le bon démarrage, à faire une fois sur `claude.ai/code` (icône d’environnement → réglages) :
+
+- **Network access = `Trusted`** : le lanceur MCP fait un `pip install -e` au premier démarrage et a besoin d’atteindre PyPI. Avec `None`, la connexion du serveur MCP échoue. (Les hooks, eux, n’ont pas besoin du réseau.)
+- **Environment variables** (format `.env`, visibles par les utilisateurs de l’environnement — préférez un environnement personnel pour un secret) :
+
+| Variable | Rôle |
+|---|---|
+| `ARET_WRITE_ENABLED` | `true` pour autoriser l’écriture (défaut `false`, lecture seule). |
+| `ARET_PROOF_HMAC_SECRET` | secret de signature des preuves `PROVEN` (à ne jamais communiquer au modèle). |
+| `ARET_MMU_BARRIER_OFF` | **sortie de secours** de la barrière. `1`/`true`/`yes`/`on` = barrière **désactivée** ; absente ou `0` = barrière **active** (normal). À n’activer que pour se débloquer si l’acquittement MCP est indisponible. |
+
+Pour fiabiliser/accélérer le premier démarrage, on peut pré-créer le venv via le **Setup script** de l’environnement (mis en cache) plutôt qu’au premier appel MCP :
+
+```bash
+cd "$CLAUDE_PROJECT_DIR/aret-memory" && python3 -m venv .venv && . .venv/bin/activate && pip install -e .
+```
+
 ## Activation contrôlée des écritures
 
 N’activez les écritures qu’après avoir validé les parcours de lecture et la politique de preuves. Le droit est lu au démarrage : une session MCP déjà connectée ne peut pas s’accorder elle-même ce privilège. Pour une session de travail, passez explicitement `ARET_WRITE_ENABLED` à `true` dans sa configuration MCP, puis redémarrez ou reconnectez le serveur et vérifiez `write_enabled: true` avec `aret_boot`.
